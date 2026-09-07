@@ -6,6 +6,7 @@ import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppResolver } from './app.resolver';
+import { VehiculosModule } from './vehiculos/vehiculos.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { AppResolver } from './app.resolver';
       sortSchema: true,
     }),
     // Cada feature agrega acá su propio módulo (ej: VehiculosAbmModule, DisponibilidadModule)
+    VehiculosModule,
   ],
   controllers: [AppController],
   providers: [AppService, AppResolver],
