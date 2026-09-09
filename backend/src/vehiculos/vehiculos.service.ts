@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vehiculo } from './entities/vehiculo.entity';
@@ -43,7 +47,10 @@ export class VehiculosService {
     return vehiculo;
   }
 
-  async update(id: number, updateVehiculoDto: UpdateVehiculoDto): Promise<Vehiculo> {
+  async update(
+    id: number,
+    updateVehiculoDto: UpdateVehiculoDto,
+  ): Promise<Vehiculo> {
     const vehiculo = await this.findOne(id);
     this.vehiculosRepository.merge(vehiculo, updateVehiculoDto);
     return this.vehiculosRepository.save(vehiculo);

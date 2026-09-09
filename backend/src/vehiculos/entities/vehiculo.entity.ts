@@ -46,13 +46,18 @@ export class Vehiculo {
     scale: 2,
     transformer: {
       to: (value: number) => value,
-      from: (value: string | null) => (value === null ? null : parseFloat(value)),
+      from: (value: string | null) =>
+        value === null ? null : parseFloat(value),
     },
   })
   precioDiario: number;
 
   @ApiProperty({ enum: EstadoVehiculo })
-  @Column({ type: 'enum', enum: EstadoVehiculo, default: EstadoVehiculo.DISPONIBLE })
+  @Column({
+    type: 'enum',
+    enum: EstadoVehiculo,
+    default: EstadoVehiculo.DISPONIBLE,
+  })
   estado: EstadoVehiculo;
 
   @ApiProperty()

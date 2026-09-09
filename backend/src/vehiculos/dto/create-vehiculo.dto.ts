@@ -16,7 +16,10 @@ const ANIO_MINIMO = 1900;
 const ANIO_MAXIMO = new Date().getFullYear() + 1;
 
 export class CreateVehiculoDto {
-  @ApiProperty({ example: 'AB123CD', description: 'Patente única del vehículo' })
+  @ApiProperty({
+    example: 'AB123CD',
+    description: 'Patente única del vehículo',
+  })
   @IsString()
   @IsNotEmpty()
   patente: string;
