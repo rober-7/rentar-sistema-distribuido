@@ -8,6 +8,7 @@ import { AppService } from './app.service';
 import { AppResolver } from './app.resolver';
 import { VehiculosModule } from './vehiculos/vehiculos.module';
 import { ClientesModule } from './clientes/clientes.module';
+import { DisponibilidadModule } from './disponibilidad/disponibilidad.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ClientesModule } from './clientes/clientes.module';
     // Cada feature agrega acá su propio módulo (ej: VehiculosAbmModule, DisponibilidadModule)
     VehiculosModule,
     ClientesModule,
+    DisponibilidadModule,
   ],
   controllers: [AppController],
   providers: [AppService, AppResolver],
