@@ -23,4 +23,10 @@ export class VehiculoDisponible {
 
   @Field(() => Float)
   precioDiario: number;
+
+  @Field(() => Float, {
+    description:
+      'Importe para el período consultado, por bloques de 24 horas redondeados hacia arriba. Se recalcula al crear la reserva con el precio vigente.',
+  })
+  importeTotal: number;
 }

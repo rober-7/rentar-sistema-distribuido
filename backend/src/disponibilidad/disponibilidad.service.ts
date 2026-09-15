@@ -2,9 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vehiculo } from '../vehiculos/entities/vehiculo.entity';
-import { EstadoVehiculo } from '../vehiculos/enums/estado-vehiculo.enum';
+import { calcularImporte } from '../common/utils/calcular-importe';
 import { FiltroDisponibilidadInput } from './dto/filtro-disponibilidad.input';
 import { VehiculoDisponible } from './dto/vehiculo-disponible.type';
+import { Reserva } from '../reservas/entities/reserva.entity';
+import { EstadoReserva } from '../reservas/enums/estado-reserva.enum';
 
 @Injectable()
 export class DisponibilidadService {
@@ -25,8 +27,24 @@ export class DisponibilidadService {
     const query = this.vehiculosRepository
       .createQueryBuilder('vehiculo')
       .where('vehiculo.activo = :activo', { activo: true })
-      .andWhere('vehiculo.estado = :estado', {
-        estado: EstadoVehiculo.DISPONIBLE,
+      .andWhere((qb) => {
+        const reservasSolapadas = qb
+          .subQuery()
+          .select('1')
+          .from(Reserva, 'reserva')
+          .where('reserva.vehiculo_id = vehiculo.id')
+          .andWhere('reserva.activo = :reservaActiva')
+          .andWhere('reserva.estado = :estadoReserva')
+          .andWhere('reserva.fechaInicio < :fechaFin')
+          .andWhere('reserva.fechaFinalizacion > :fechaInicio')
+          .getQuery();
+        return `NOT EXISTS ${reservasSolapadas}`;
+      })
+      .setParameters({
+        reservaActiva: true,
+        estadoReserva: EstadoReserva.CONFIRMADA,
+        fechaInicio: filtro.fechaInicio,
+        fechaFin: filtro.fechaFin,
       });
 
     if (filtro.tipoVehiculo) {
@@ -55,10 +73,6 @@ export class DisponibilidadService {
       });
     }
 
-    // Nota: cuando exista el ABM de reservas, acá debería excluirse todo
-    // vehículo con una reserva CONFIRMADA que se solape con
-    // [filtro.fechaInicio, filtro.fechaFin]. Por ahora la disponibilidad
-    // se resuelve únicamente con el estado actual del vehículo.
     const vehiculos = await query.getMany();
 
     return vehiculos.map((vehiculo) => ({
@@ -69,6 +83,11 @@ export class DisponibilidadService {
       color: vehiculo.color,
       tipoVehiculo: vehiculo.tipoVehiculo,
       precioDiario: vehiculo.precioDiario,
+      importeTotal: calcularImporte(
+        vehiculo.precioDiario,
+        filtro.fechaInicio,
+        filtro.fechaFin,
+      ),
     }));
   }
 }

@@ -9,6 +9,7 @@ import { AppResolver } from './app.resolver';
 import { VehiculosModule } from './vehiculos/vehiculos.module';
 import { ClientesModule } from './clientes/clientes.module';
 import { DisponibilidadModule } from './disponibilidad/disponibilidad.module';
+import { ReservasModule } from './reservas/reservas.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { DisponibilidadModule } from './disponibilidad/disponibilidad.module';
     VehiculosModule,
     ClientesModule,
     DisponibilidadModule,
+    ReservasModule,
   ],
   controllers: [AppController],
   providers: [AppService, AppResolver],
