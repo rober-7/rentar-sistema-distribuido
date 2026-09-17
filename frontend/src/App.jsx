@@ -1,20 +1,14 @@
-import { useState } from 'react'
-import './App.css'
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Home from './pages/home';
+import GestionVehiculos from './pages/GestionVehiculos';
 
-function App() {
-  const [count, setCount] = useState(0)
-
+export default function App() {
   return (
-    <>
-      <h1>Rentar</h1>
-      <p>Sistema de alquiler de vehículos</p>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-      </div>
-    </>
-  )
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/vehiculos" element={<GestionVehiculos />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
-
-export default App
