@@ -1,5 +1,12 @@
-﻿import { Body, Controller, Post } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+﻿import {
+  Body,
+  Controller,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ReservasService } from './reservas.service';
 import { CreateReservaDto } from './dto/create-reserva.dto';
 import { Reserva } from './entities/reserva.entity';
@@ -32,5 +39,24 @@ export class ReservasController {
   })
   create(@Body() createReservaDto: CreateReservaDto): Promise<Reserva> {
     return this.reservasService.create(createReservaDto);
+  }
+
+  @Patch(':id/cancelar')
+  @ApiOperation({
+    summary: 'Cancela una reserva antes del inicio del alquiler',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Reserva cancelada',
+    type: Reserva,
+  })
+  @ApiResponse({ status: 404, description: 'No existe una reserva con ese id' })
+  @ApiResponse({
+    status: 409,
+    description: 'La reserva ya está cancelada o el alquiler ya comenzó',
+  })
+  cancel(@Param('id', ParseIntPipe) id: number): Promise<Reserva> {
+    return this.reservasService.cancel(id);
   }
 }

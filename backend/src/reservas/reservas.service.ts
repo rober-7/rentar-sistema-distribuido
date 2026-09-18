@@ -105,4 +105,27 @@ export class ReservasService {
       return manager.save(Reserva, reserva);
     });
   }
+
+  async cancel(id: number): Promise<Reserva> {
+    return this.reservasRepository.manager.transaction(async (manager) => {
+      const reserva = await manager.findOne(Reserva, {
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!reserva) {
+        throw new NotFoundException(`No existe una reserva con id ${id}`);
+      }
+      if (reserva.estado === EstadoReserva.CANCELADA) {
+        throw new ConflictException('La reserva ya está cancelada');
+      }
+      if (reserva.fechaInicio.getTime() <= Date.now()) {
+        throw new ConflictException(
+          'No se puede cancelar una reserva cuyo alquiler ya comenzó',
+        );
+      }
+
+      reserva.estado = EstadoReserva.CANCELADA;
+      return manager.save(Reserva, reserva);
+    });
+  }
 }
