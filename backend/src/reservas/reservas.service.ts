@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, MoreThan, Repository } from 'typeorm';
 import { Reserva } from './entities/reserva.entity';
 import { CreateReservaDto } from './dto/create-reserva.dto';
+import { FiltroReservasInput } from './dto/filtro-reservas.input';
+import { ReservaConsulta } from './dto/reserva-consulta.type';
 import { Cliente } from '../clientes/entities/cliente.entity';
 import { Vehiculo } from '../vehiculos/entities/vehiculo.entity';
 import { EstadoVehiculo } from '../vehiculos/enums/estado-vehiculo.enum';
@@ -20,6 +22,65 @@ export class ReservasService {
     @InjectRepository(Reserva)
     private readonly reservasRepository: Repository<Reserva>,
   ) {}
+
+  async findAll(filtro: FiltroReservasInput): Promise<ReservaConsulta[]> {
+    if (filtro.desde && filtro.hasta && filtro.hasta < filtro.desde) {
+      throw new BadRequestException(
+        'La fecha de finalización del filtro debe ser posterior a la fecha de inicio',
+      );
+    }
+
+    const query = this.reservasRepository
+      .createQueryBuilder('reserva')
+      .innerJoinAndSelect('reserva.cliente', 'cliente')
+      .innerJoinAndSelect('reserva.vehiculo', 'vehiculo')
+      .orderBy('reserva.fechaInicio', 'DESC');
+
+    if (filtro.clienteId) {
+      query.andWhere('cliente.id = :clienteId', {
+        clienteId: filtro.clienteId,
+      });
+    }
+    if (filtro.vehiculoId) {
+      query.andWhere('vehiculo.id = :vehiculoId', {
+        vehiculoId: filtro.vehiculoId,
+      });
+    }
+    if (filtro.tipoVehiculo) {
+      query.andWhere('vehiculo.tipoVehiculo = :tipoVehiculo', {
+        tipoVehiculo: filtro.tipoVehiculo,
+      });
+    }
+    if (filtro.estado) {
+      query.andWhere('reserva.estado = :estado', { estado: filtro.estado });
+    }
+    if (filtro.desde) {
+      query.andWhere('reserva.fechaFinalizacion >= :desde', {
+        desde: filtro.desde,
+      });
+    }
+    if (filtro.hasta) {
+      query.andWhere('reserva.fechaInicio <= :hasta', {
+        hasta: filtro.hasta,
+      });
+    }
+
+    const reservas = await query.getMany();
+
+    return reservas.map((reserva) => ({
+      id: reserva.id,
+      cliente: `${reserva.cliente.nombre} ${reserva.cliente.apellido}`,
+      clienteId: reserva.cliente.id,
+      vehiculo: `${reserva.vehiculo.marca} ${reserva.vehiculo.modelo}`,
+      vehiculoId: reserva.vehiculo.id,
+      patente: reserva.vehiculo.patente,
+      fechaInicio: reserva.fechaInicio,
+      fechaFinalizacion: reserva.fechaFinalizacion,
+      precioDiario: reserva.vehiculo.precioDiario,
+      importeTotal: reserva.importeTotal,
+      estado: reserva.estado,
+    }));
+  }
 
   async create(dto: CreateReservaDto): Promise<Reserva> {
     const fechaInicio = new Date(dto.fechaInicio);
