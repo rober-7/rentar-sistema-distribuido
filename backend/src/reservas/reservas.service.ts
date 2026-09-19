@@ -12,7 +12,6 @@ import { FiltroReservasInput } from './dto/filtro-reservas.input';
 import { ReservaConsulta } from './dto/reserva-consulta.type';
 import { Cliente } from '../clientes/entities/cliente.entity';
 import { Vehiculo } from '../vehiculos/entities/vehiculo.entity';
-import { EstadoVehiculo } from '../vehiculos/enums/estado-vehiculo.enum';
 import { calcularImporte } from '../common/utils/calcular-importe';
 import { EstadoReserva } from './enums/estado-reserva.enum';
 
@@ -143,11 +142,6 @@ export class ReservasService {
         throw new ConflictException(
           'El vehículo ya está reservado para esas fechas',
         );
-      }
-
-      if (vehiculo.estado !== EstadoVehiculo.RESERVADO) {
-        vehiculo.estado = EstadoVehiculo.RESERVADO;
-        await manager.save(Vehiculo, vehiculo);
       }
 
       const reserva = manager.create(Reserva, {

@@ -28,8 +28,10 @@ importeTotal. El importe se calcula en el servidor y queda guardado en la reserv
   fechas de las reservas. EN_ALQUILER se considera no disponible, ya que todavía
   no hay un registro de alquiler con fecha de devolución que permita determinar
   cuándo se liberará. La consulta de disponibilidad sigue el mismo criterio.
-- El alta cambia el estado del vehículo a RESERVADO dentro de la misma transacción
-  que guarda la reserva. La reserva confirmada indica qué período está ocupado.
+- El estado del vehículo (DISPONIBLE/RESERVADO/EN_ALQUILER) no se guarda: se calcula
+  al leer el vehículo a partir de sus reservas CONFIRMADAS vigentes (ver
+  `VehiculosService`). Así, cancelar una reserva o que termine su período no puede
+  dejar el campo desactualizado.
 - La transacción bloquea el vehículo antes de consultar solapamientos e insertar.
   Dos altas simultáneas por este servicio no pueden confirmar el mismo período.
 - El cliente se recibe como ID porque este módulo todavía no tiene autenticación.

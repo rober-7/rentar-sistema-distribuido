@@ -10,6 +10,7 @@ import { VehiculosModule } from './vehiculos/vehiculos.module';
 import { ClientesModule } from './clientes/clientes.module';
 import { DisponibilidadModule } from './disponibilidad/disponibilidad.module';
 import { ReservasModule } from './reservas/reservas.module';
+import { HistorialModule } from './historial/historial.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ReservasModule } from './reservas/reservas.module';
     ClientesModule,
     DisponibilidadModule,
     ReservasModule,
+    HistorialModule,
   ],
   controllers: [AppController],
   providers: [AppService, AppResolver],
