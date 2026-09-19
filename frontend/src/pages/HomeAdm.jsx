@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Container } from 'react-bootstrap';
 import NavBar from '../components/NavBar';
 
-export default function Home() {
+export default function HomeAdm() {
   return (
     <div>
       {/* Barra de navegación */}
