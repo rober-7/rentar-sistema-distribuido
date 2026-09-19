@@ -3,6 +3,9 @@ import { TipoVehiculo } from '../../vehiculos/enums/tipo-vehiculo.enum';
 
 @ObjectType()
 export class VehiculoDisponible {
+  @Field(() => Int)
+  id: number;
+
   @Field()
   patente: string;
 
