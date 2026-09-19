@@ -1,14 +1,18 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Container, Form, Button, Row, Col, Card, Table, Alert } from 'react-bootstrap';
 import { gql } from '@apollo/client';
 import { useLazyQuery } from '@apollo/client/react';
 import NavBarCliente from '../components/NavBarCliente';
+import { crearReserva } from '../services/reservas.service';
+import { obtenerClienteActual } from '../utils/clienteActual';
 import Swal from 'sweetalert2';
 
 // Definimos la query de GraphQL como la espera el backend
 const BUSCAR_DISPONIBILIDAD = gql`
   query VehiculosDisponibles($filtro: FiltroDisponibilidadInput!) {
     vehiculosDisponibles(filtro: $filtro) {
+      id
       patente
       marca
       modelo
@@ -22,6 +26,7 @@ const BUSCAR_DISPONIBILIDAD = gql`
 `;
 
 export default function ConsultarDisponibilidad() {
+  const navigate = useNavigate();
   const [filtro, setFiltro] = useState({
     fechaInicio: '',
     fechaFin: '',
@@ -34,6 +39,8 @@ export default function ConsultarDisponibilidad() {
 
   // Hook de Apollo para ejecutar la query bajo demanda (se añadió 'const')
   const [ejecutarBusqueda, { loading, data, error }] = useLazyQuery(BUSCAR_DISPONIBILIDAD);
+  const [periodoConsultado, setPeriodoConsultado] = useState(null);
+  const [reservandoId, setReservandoId] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -61,6 +68,49 @@ export default function ConsultarDisponibilidad() {
     };
 
     ejecutarBusqueda({ variables: { filtro: variablesFiltro } });
+    setPeriodoConsultado(variablesFiltro);
+  };
+
+  const handleReservar = async (vehiculo) => {
+    const clienteActual = obtenerClienteActual();
+    if (!clienteActual) {
+      const resultado = await Swal.fire({
+        title: 'Identificate primero',
+        text: 'Todavía no elegiste con qué cliente vas a reservar.',
+        icon: 'info',
+        showCancelButton: true,
+        confirmButtonText: 'Ir a identificarme',
+        cancelButtonText: 'Cancelar',
+      });
+      if (resultado.isConfirmed) navigate('/cliente');
+      return;
+    }
+
+    const confirmacion = await Swal.fire({
+      title: 'Confirmar reserva',
+      html: `Vas a reservar el <b>${vehiculo.marca} ${vehiculo.modelo}</b> (patente ${vehiculo.patente})<br/>Importe total: <b>$${vehiculo.importeTotal}</b>`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Confirmar reserva',
+      cancelButtonText: 'Cancelar',
+    });
+    if (!confirmacion.isConfirmed) return;
+
+    setReservandoId(vehiculo.id);
+    try {
+      await crearReserva({
+        vehiculo: vehiculo.id,
+        cliente: clienteActual.id,
+        fechaInicio: periodoConsultado.fechaInicio,
+        fechaFinalizacion: periodoConsultado.fechaFin,
+      });
+      await Swal.fire('¡Reserva confirmada!', 'Ya podés verla en "Mis Reservas".', 'success');
+      ejecutarBusqueda({ variables: { filtro: periodoConsultado } });
+    } catch (error) {
+      Swal.fire('No se pudo reservar', error.message, 'error');
+    } finally {
+      setReservandoId(null);
+    }
   };
 
   const vehiculosDisponibles = data?.vehiculosDisponibles || [];
@@ -145,7 +195,7 @@ export default function ConsultarDisponibilidad() {
               </tr>
             ) : (
               vehiculosDisponibles.map((v) => (
-                <tr key={v.patente}>
+                <tr key={v.id}>
                   <td>{v.patente}</td>
                   <td>{v.marca} {v.modelo}</td>
                   <td>{v.anio}</td>
@@ -154,8 +204,13 @@ export default function ConsultarDisponibilidad() {
                   <td>${v.precioDiario}</td>
                   <td className="fw-bold text-success">${v.importeTotal}</td>
                   <td>
-                    <Button variant="success" size="sm" onClick={() => Swal.fire('Próximamente', 'Acá se iniciará el flujo de reserva.', 'info')}>
-                      Reservar
+                    <Button
+                      variant="success"
+                      size="sm"
+                      disabled={reservandoId === v.id}
+                      onClick={() => handleReservar(v)}
+                    >
+                      {reservandoId === v.id ? 'Reservando...' : 'Reservar'}
                     </Button>
                   </td>
                 </tr>

@@ -1,18 +1,33 @@
+import { useState } from 'react';
 import { Container, Row, Col, Card, Button } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import NavBarCliente from '../components/NavBarCliente';
+import SelectorCliente from '../components/SelectorCliente';
+import { obtenerClienteActual } from '../utils/clienteActual';
 
 export default function HomeCliente() {
   const navigate = useNavigate();
+  const [clienteActual, setClienteActual] = useState(obtenerClienteActual());
+
+  if (!clienteActual) {
+    return (
+      <>
+        <NavBarCliente />
+        <Container className="mt-5">
+          <SelectorCliente onSeleccionar={setClienteActual} />
+        </Container>
+      </>
+    );
+  }
 
   return (
     <>
       <NavBarCliente />
-      
+
       {/* Sección Hero / Bienvenida */}
       <div className="bg-primary text-white py-5 mb-5 text-center shadow-sm">
         <Container>
-          <h1 className="fw-bold">Bienvenido a Rentar</h1>
+          <h1 className="fw-bold">Hola, {clienteActual.nombre}!</h1>
           <p className="lead">Tu próximo viaje empieza acá. Buscá, reservá y gestioná tus alquileres.</p>
           <Button 
             variant="light" 

@@ -76,6 +76,7 @@ export class DisponibilidadService {
     const vehiculos = await query.getMany();
 
     return vehiculos.map((vehiculo) => ({
+      id: vehiculo.id,
       patente: vehiculo.patente,
       marca: vehiculo.marca,
       modelo: vehiculo.modelo,
