@@ -1,0 +1,5 @@
+export enum EstadoVehiculo {
+  DISPONIBLE = 'DISPONIBLE',
+  RESERVADO = 'RESERVADO',
+  EN_ALQUILER = 'EN_ALQUILER',
+}
