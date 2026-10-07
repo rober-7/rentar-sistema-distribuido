@@ -8,25 +8,37 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
-import { Cliente } from './entities/cliente.entity';
+import { Usuario } from './entities/usuario.entity';
+import { Authenticated } from '../auth/auth.guards';
+import { Roles } from '../auth/roles.decorator';
+import { RolUsuario } from './enums/rol-usuario.enum';
 
 @ApiTags('Clientes')
+@ApiBearerAuth()
+@Authenticated()
+@Roles(RolUsuario.ADMIN)
 @Controller('clientes')
 export class ClientesController {
   constructor(private readonly clientesService: ClientesService) {}
 
   @Post()
   @ApiOperation({ summary: 'Da de alta un cliente' })
-  @ApiResponse({ status: 201, description: 'Cliente creado', type: Cliente })
+  @ApiResponse({ status: 201, description: 'Cliente creado', type: Usuario })
   @ApiResponse({
     status: 409,
     description: 'Ya existe un cliente con ese documento o email',
   })
-  create(@Body() createClienteDto: CreateClienteDto): Promise<Cliente> {
+  create(@Body() createClienteDto: CreateClienteDto): Promise<Usuario> {
     return this.clientesService.create(createClienteDto);
   }
 
@@ -35,9 +47,9 @@ export class ClientesController {
   @ApiResponse({
     status: 200,
     description: 'Listado de clientes',
-    type: [Cliente],
+    type: [Usuario],
   })
-  findAll(): Promise<Cliente[]> {
+  findAll(): Promise<Usuario[]> {
     return this.clientesService.findAll();
   }
 
@@ -47,10 +59,10 @@ export class ClientesController {
   @ApiResponse({
     status: 200,
     description: 'Cliente encontrado',
-    type: Cliente,
+    type: Usuario,
   })
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
-  findOne(@Param('id', ParseIntPipe) id: number): Promise<Cliente> {
+  findOne(@Param('id', ParseIntPipe) id: number): Promise<Usuario> {
     return this.clientesService.findOne(id);
   }
 
@@ -62,13 +74,13 @@ export class ClientesController {
   @ApiResponse({
     status: 200,
     description: 'Cliente actualizado',
-    type: Cliente,
+    type: Usuario,
   })
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateClienteDto: UpdateClienteDto,
-  ): Promise<Cliente> {
+  ): Promise<Usuario> {
     return this.clientesService.update(id, updateClienteDto);
   }
 
@@ -78,10 +90,10 @@ export class ClientesController {
   @ApiResponse({
     status: 200,
     description: 'Cliente dado de baja',
-    type: Cliente,
+    type: Usuario,
   })
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
-  remove(@Param('id', ParseIntPipe) id: number): Promise<Cliente> {
+  remove(@Param('id', ParseIntPipe) id: number): Promise<Usuario> {
     return this.clientesService.remove(id);
   }
 }

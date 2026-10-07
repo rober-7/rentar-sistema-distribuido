@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { Vehiculo } from '../../vehiculos/entities/vehiculo.entity';
-import { Cliente } from '../../clientes/entities/cliente.entity';
+import { Usuario } from '../../clientes/entities/usuario.entity';
 import { EstadoReserva } from '../enums/estado-reserva.enum';
 
 @Entity('reservas')
@@ -23,10 +23,10 @@ export class Reserva {
   @JoinColumn({ name: 'vehiculo_id' })
   vehiculo: Vehiculo;
 
-  @ApiProperty({ type: () => Cliente })
-  @ManyToOne(() => Cliente, { nullable: false })
+  @ApiProperty({ type: () => Usuario })
+  @ManyToOne(() => Usuario, { nullable: false })
   @JoinColumn({ name: 'cliente_id' })
-  cliente: Cliente;
+  cliente: Usuario;
 
   @ApiProperty({
     example: '2026-09-14T10:00:00-03:00',

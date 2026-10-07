@@ -11,7 +11,7 @@ import { ClientesModule } from './clientes/clientes.module';
 import { DisponibilidadModule } from './disponibilidad/disponibilidad.module';
 import { ReservasModule } from './reservas/reservas.module';
 import { HistorialModule } from './historial/historial.module';
-
+import { AuthModule } from './auth/auth.module';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -28,8 +28,9 @@ import { HistorialModule } from './historial/historial.module';
       driver: ApolloDriver,
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
+      context: ({ req }) => ({ req }),
     }),
-    // Cada feature agrega acá su propio módulo (ej: VehiculosAbmModule, DisponibilidadModule)
+    AuthModule,
     VehiculosModule,
     ClientesModule,
     DisponibilidadModule,
