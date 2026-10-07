@@ -4,71 +4,71 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
-import { Cliente } from './entities/cliente.entity';
+import { Usuario } from './entities/usuario.entity';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
+import { RolUsuario } from './enums/rol-usuario.enum';
 
 @Injectable()
 export class ClientesService {
   constructor(
-    @InjectRepository(Cliente)
-    private readonly clientesRepository: Repository<Cliente>,
+    @InjectRepository(Usuario)
+    private readonly usuariosRepository: Repository<Usuario>,
   ) {}
-
-  async create(createClienteDto: CreateClienteDto): Promise<Cliente> {
-    const [existenteDocumento, existenteEmail] = await Promise.all([
-      this.clientesRepository.findOne({
-        where: { documento: createClienteDto.documento },
-      }),
-      this.clientesRepository.findOne({
-        where: { email: createClienteDto.email },
-      }),
+  async create(dto: CreateClienteDto): Promise<Usuario> {
+    const [documento, email] = await Promise.all([
+      this.usuariosRepository.findOne({ where: { documento: dto.documento } }),
+      this.usuariosRepository.findOne({ where: { email: dto.email } }),
     ]);
-
-    if (existenteDocumento) {
+    if (documento)
       throw new ConflictException(
-        `Ya existe un cliente con el documento ${createClienteDto.documento}`,
+        `Ya existe un cliente con el documento ${dto.documento}`,
       );
-    }
-    if (existenteEmail) {
+    if (email)
       throw new ConflictException(
-        `Ya existe un cliente con el email ${createClienteDto.email}`,
+        `Ya existe un cliente con el email ${dto.email}`,
       );
-    }
-
-    const cliente = this.clientesRepository.create({
-      ...createClienteDto,
-      activo: true,
+    const { password, ...datos } = dto;
+    return this.usuariosRepository.save(
+      this.usuariosRepository.create({
+        ...datos,
+        passwordHash: await bcrypt.hash(password, 12),
+        rol: RolUsuario.CLIENTE,
+        activo: true,
+      }),
+    );
+  }
+  findAll(): Promise<Usuario[]> {
+    return this.usuariosRepository.find({ where: { rol: RolUsuario.CLIENTE } });
+  }
+  async findOne(id: number): Promise<Usuario> {
+    const cliente = await this.usuariosRepository.findOne({
+      where: { id, rol: RolUsuario.CLIENTE },
     });
-    return this.clientesRepository.save(cliente);
-  }
-
-  findAll(): Promise<Cliente[]> {
-    return this.clientesRepository.find();
-  }
-
-  async findOne(id: number): Promise<Cliente> {
-    const cliente = await this.clientesRepository.findOne({ where: { id } });
-    if (!cliente) {
+    if (!cliente)
       throw new NotFoundException(`No existe un cliente con id ${id}`);
-    }
     return cliente;
   }
-
-  async update(
-    id: number,
-    updateClienteDto: UpdateClienteDto,
-  ): Promise<Cliente> {
-    const cliente = await this.findOne(id);
-    this.clientesRepository.merge(cliente, updateClienteDto);
-    return this.clientesRepository.save(cliente);
+  async findByEmailWithPassword(email: string): Promise<Usuario | null> {
+    return this.usuariosRepository
+      .createQueryBuilder('usuario')
+      .addSelect('usuario.passwordHash')
+      .where('LOWER(usuario.email) = LOWER(:email)', { email })
+      .getOne();
   }
-
-  async remove(id: number): Promise<Cliente> {
+  async findActiveUser(id: number): Promise<Usuario | null> {
+    return this.usuariosRepository.findOne({ where: { id, activo: true } });
+  }
+  async update(id: number, dto: UpdateClienteDto): Promise<Usuario> {
+    const cliente = await this.findOne(id);
+    this.usuariosRepository.merge(cliente, dto);
+    return this.usuariosRepository.save(cliente);
+  }
+  async remove(id: number): Promise<Usuario> {
     const cliente = await this.findOne(id);
     cliente.activo = false;
-    // Nota: Los clientes inactivos no podrán realizar nuevos alquileres.
-    return this.clientesRepository.save(cliente);
+    return this.usuariosRepository.save(cliente);
   }
 }

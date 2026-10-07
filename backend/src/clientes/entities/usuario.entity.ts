@@ -1,3 +1,4 @@
+import { ApiHideProperty, ApiProperty } from '@nestjs/swagger';
 import {
   Column,
   CreateDateColumn,
@@ -5,10 +6,10 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { ApiProperty } from '@nestjs/swagger';
+import { RolUsuario } from '../enums/rol-usuario.enum';
 
-@Entity('clientes')
-export class Cliente {
+@Entity('usuarios')
+export class Usuario {
   @ApiProperty()
   @PrimaryGeneratedColumn()
   id: number;
@@ -29,11 +30,23 @@ export class Cliente {
   @Column({ type: 'varchar', unique: true })
   email: string;
 
+  @ApiHideProperty()
+  @Column({ type: 'varchar', select: false })
+  passwordHash: string;
+
+  @ApiProperty({ enum: RolUsuario })
+  @Column({
+    type: 'enum',
+    enum: RolUsuario,
+    default: RolUsuario.CLIENTE,
+  })
+  rol: RolUsuario;
+
   @ApiProperty({ nullable: true })
   @Column({ type: 'varchar', nullable: true })
   telefono: string | null;
 
-  @ApiProperty({ example: '1990-05-15', description: 'Fecha de nacimiento' })
+  @ApiProperty({ example: '1990-05-15' })
   @Column({ type: 'date' })
   fechaNacimiento: string;
 

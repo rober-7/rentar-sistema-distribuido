@@ -5,13 +5,11 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MinLength,
 } from 'class-validator';
 
 export class CreateClienteDto {
-  @ApiProperty({
-    example: '12345678',
-    description: 'Documento único del cliente',
-  })
+  @ApiProperty({ example: '12345678' })
   @IsString()
   @IsNotEmpty()
   documento: string;
@@ -28,16 +26,19 @@ export class CreateClienteDto {
 
   @ApiProperty({ example: 'juan.perez@example.com' })
   @IsEmail()
-  @IsNotEmpty()
   email: string;
 
-  @ApiPropertyOptional({ example: '1112345678' })
+  @ApiProperty({ minLength: 8, writeOnly: true })
+  @IsString()
+  @MinLength(8)
+  password: string;
+
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   telefono?: string;
 
-  @ApiProperty({ example: '1990-05-15', description: 'Fecha de nacimiento' })
+  @ApiProperty({ example: '1990-05-15' })
   @IsDateString()
-  @IsNotEmpty()
   fechaNacimiento: string;
 }

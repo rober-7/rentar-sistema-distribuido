@@ -58,6 +58,16 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
    | Contraseña         | `rentar`      |
    | Base de datos      | `rentar_db`   |
 
+
+   ### Acceso inicial
+
+   En el primer inicio, el backend crea automáticamente un administrador si todavía no existe.
+
+   | Campo | Valor |
+   |---|---|
+   | Email | `admin@rentar.com` |
+   | Contraseña | Valor configurado en `ADMIN_PASSWORD` dentro de `backend/.env` |
+
 5. Para bajar todo: `Ctrl+C` en la terminal donde quedó corriendo, y después:
 
    ```bash
@@ -65,8 +75,6 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
    ```
 
    Si además querés borrar los datos de la base (empezar de cero), usá `docker compose down -v`.
-
-> ⚠️ **Todavía no hay lógica de negocio implementada.** Este esqueleto solo deja funcionando la infraestructura (Docker, NestJS conectado a Postgres, GraphQL registrado). Cada caso de uso (vehículos, clientes, reservas, disponibilidad) se va a desarrollar en su propia rama `feature/...` partiendo de `desarrollo`.
 
 ## Hot reload
 

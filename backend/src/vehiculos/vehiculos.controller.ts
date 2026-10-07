@@ -8,13 +8,25 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { VehiculosService } from './vehiculos.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
 import { Vehiculo } from './entities/vehiculo.entity';
+import { Authenticated } from '../auth/auth.guards';
+import { Roles } from '../auth/roles.decorator';
+import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
 
 @ApiTags('Vehiculos')
+@ApiBearerAuth()
+@Authenticated()
+@Roles(RolUsuario.ADMIN)
 @Controller('vehiculos')
 export class VehiculosController {
   constructor(private readonly vehiculosService: VehiculosService) {}

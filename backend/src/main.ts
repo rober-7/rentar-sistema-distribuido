@@ -17,6 +17,7 @@ async function bootstrap() {
     .setTitle('Rentar API')
     .setDescription('API REST + GraphQL del sistema de alquiler de vehículos')
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
