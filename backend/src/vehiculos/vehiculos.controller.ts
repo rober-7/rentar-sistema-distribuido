@@ -3,11 +3,15 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
+  NotFoundException,
+  OnModuleInit,
   Param,
   ParseIntPipe,
   Patch,
   Post,
 } from '@nestjs/common';
+import { status as GrpcStatus } from '@grpc/grpc-js';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -15,6 +19,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { ClientGrpc } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 import { VehiculosService } from './vehiculos.service';
 import { CreateVehiculoDto } from './dto/create-vehiculo.dto';
 import { UpdateVehiculoDto } from './dto/update-vehiculo.dto';
@@ -22,14 +28,31 @@ import { Vehiculo } from './entities/vehiculo.entity';
 import { Authenticated } from '../auth/auth.guards';
 import { Roles } from '../auth/roles.decorator';
 import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
+import { VEHICULO_PACKAGE } from './vehiculos.constants';
+import {
+  VehiculoGrpc,
+  VehiculoServiceGrpcClient,
+} from './grpc/vehiculo-grpc.interface';
 
 @ApiTags('Vehiculos')
 @ApiBearerAuth()
 @Authenticated()
 @Roles(RolUsuario.ADMIN)
 @Controller('vehiculos')
-export class VehiculosController {
-  constructor(private readonly vehiculosService: VehiculosService) {}
+export class VehiculosController implements OnModuleInit {
+  private vehiculoGrpcService: VehiculoServiceGrpcClient;
+
+  constructor(
+    private readonly vehiculosService: VehiculosService,
+    @Inject(VEHICULO_PACKAGE) private readonly grpcClient: ClientGrpc,
+  ) {}
+
+  onModuleInit() {
+    this.vehiculoGrpcService =
+      this.grpcClient.getService<VehiculoServiceGrpcClient>(
+        'VehiculoService',
+      );
+  }
 
   @Post()
   @ApiOperation({
@@ -45,18 +68,25 @@ export class VehiculosController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lista todos los vehículos' })
+  @ApiOperation({
+    summary: 'Lista todos los vehículos (vía Vehicle Service, gRPC)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Listado de vehículos',
     type: [Vehiculo],
   })
-  findAll(): Promise<Vehiculo[]> {
-    return this.vehiculosService.findAll();
+  async findAll(): Promise<VehiculoGrpc[]> {
+    const { vehiculos } = await firstValueFrom(
+      this.vehiculoGrpcService.listarVehiculos({}),
+    );
+    return vehiculos;
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Consulta un vehículo por id' })
+  @ApiOperation({
+    summary: 'Consulta un vehículo por id (vía Vehicle Service, gRPC)',
+  })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({
     status: 200,
@@ -64,8 +94,17 @@ export class VehiculosController {
     type: Vehiculo,
   })
   @ApiResponse({ status: 404, description: 'No existe un vehículo con ese id' })
-  findOne(@Param('id', ParseIntPipe) id: number): Promise<Vehiculo> {
-    return this.vehiculosService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number): Promise<VehiculoGrpc> {
+    try {
+      return await firstValueFrom(
+        this.vehiculoGrpcService.obtenerVehiculo({ id }),
+      );
+    } catch (error) {
+      if (error?.code === GrpcStatus.NOT_FOUND) {
+        throw new NotFoundException(`No existe un vehículo con id ${id}`);
+      }
+      throw error;
+    }
   }
 
   @Patch(':id')

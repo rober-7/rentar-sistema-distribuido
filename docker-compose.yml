@@ -26,6 +26,26 @@ services:
     depends_on:
       - db
 
+  vehicle_service:
+    build:
+      context: ./services/vehicle-service
+      dockerfile: Dockerfile
+    container_name: rentar_vehicle_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: rentar
+      DB_PASSWORD: rentar
+      DB_NAME: rentar_db
+      GRPC_PORT: 50051
+    volumes:
+      - ./services/vehicle-service:/app
+      - ./proto:/app/proto
+    depends_on:
+      db:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -37,11 +57,16 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      - ./proto:/app/proto
     env_file:
       - ./backend/.env
+    environment:
+      VEHICLE_SERVICE_URL: vehicle_service:50051
     depends_on:
       db:
         condition: service_healthy
+      vehicle_service:
+        condition: service_started
 
   frontend:
     build:

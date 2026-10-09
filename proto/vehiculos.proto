@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package vehiculos;
+
+// Vehicle Service - gestiona el dominio de vehículos (Hito 2).
+// Implementado hoy: ListarVehiculos.
+// Declarados en el contrato, implementación en pasos futuros: ObtenerVehiculo,
+// ConsultarDisponibilidad, ActualizarEstado.
+service VehiculoService {
+  rpc ListarVehiculos(ListarVehiculosRequest) returns (ListarVehiculosResponse);
+  rpc ObtenerVehiculo(ObtenerVehiculoRequest) returns (Vehiculo);
+  rpc ConsultarDisponibilidad(ConsultarDisponibilidadRequest) returns (ListarVehiculosResponse);
+  rpc ActualizarEstado(ActualizarEstadoRequest) returns (Vehiculo);
+}
+
+enum TipoVehiculo {
+  TIPO_VEHICULO_UNSPECIFIED = 0;
+  SEDAN = 1;
+  SUV = 2;
+  PICKUP = 3;
+  COUPE = 4;
+  HATCHBACK = 5;
+}
+
+enum EstadoVehiculo {
+  ESTADO_VEHICULO_UNSPECIFIED = 0;
+  DISPONIBLE = 1;
+  RESERVADO = 2;
+  EN_ALQUILER = 3;
+}
+
+message Vehiculo {
+  int32 id = 1;
+  string patente = 2;
+  string marca = 3;
+  string modelo = 4;
+  int32 anio = 5;
+  optional string color = 6;
+  TipoVehiculo tipo_vehiculo = 7;
+  double precio_diario = 8;
+  EstadoVehiculo estado = 9;
+  bool activo = 10;
+  string creado_en = 11;
+  string actualizado_en = 12;
+}
+
+message ListarVehiculosRequest {}
+
+message ListarVehiculosResponse {
+  repeated Vehiculo vehiculos = 1;
+}
+
+message ObtenerVehiculoRequest {
+  int32 id = 1;
+}
+
+message ConsultarDisponibilidadRequest {
+  string fecha_inicio = 1;
+  string fecha_finalizacion = 2;
+  optional TipoVehiculo tipo_vehiculo = 3;
+  optional string marca = 4;
+  optional string modelo = 5;
+  optional double precio_minimo = 6;
+  optional double precio_maximo = 7;
+}
+
+message ActualizarEstadoRequest {
+  int32 id = 1;
+  EstadoVehiculo estado = 2;
+}

@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package clientes;
+
+// Customer Service - gestiona el dominio de clientes (Hito 2).
+// Contrato definido para esta entrega; implementación en un paso futuro.
+service ClienteService {
+  rpc ListarClientes(ListarClientesRequest) returns (ListarClientesResponse);
+  rpc ObtenerCliente(ObtenerClienteRequest) returns (Cliente);
+  rpc VerificarExistencia(VerificarExistenciaRequest) returns (VerificarExistenciaResponse);
+  rpc VerificarActivo(VerificarActivoRequest) returns (VerificarActivoResponse);
+}
+
+message Cliente {
+  int32 id = 1;
+  string documento = 2;
+  string nombre = 3;
+  string apellido = 4;
+  string email = 5;
+  optional string telefono = 6;
+  string fecha_nacimiento = 7;
+  bool activo = 8;
+}
+
+message ListarClientesRequest {}
+
+message ListarClientesResponse {
+  repeated Cliente clientes = 1;
+}
+
+message ObtenerClienteRequest {
+  int32 id = 1;
+}
+
+message VerificarExistenciaRequest {
+  int32 id = 1;
+}
+
+message VerificarExistenciaResponse {
+  bool existe = 1;
+}
+
+message VerificarActivoRequest {
+  int32 id = 1;
+}
+
+message VerificarActivoResponse {
+  bool activo = 1;
+}
