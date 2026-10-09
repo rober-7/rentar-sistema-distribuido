@@ -3,14 +3,15 @@ syntax = "proto3";
 package vehiculos;
 
 // Vehicle Service - gestiona el dominio de vehículos (Hito 2).
-// Implementado hoy: ListarVehiculos.
-// Declarados en el contrato, implementación en pasos futuros: ObtenerVehiculo,
-// ConsultarDisponibilidad, ActualizarEstado.
+// Todas las operaciones están implementadas: el Gateway no accede directo a
+// la base de datos de este dominio, todo pasa por acá.
 service VehiculoService {
   rpc ListarVehiculos(ListarVehiculosRequest) returns (ListarVehiculosResponse);
   rpc ObtenerVehiculo(ObtenerVehiculoRequest) returns (Vehiculo);
   rpc ConsultarDisponibilidad(ConsultarDisponibilidadRequest) returns (ListarVehiculosResponse);
   rpc ActualizarEstado(ActualizarEstadoRequest) returns (Vehiculo);
+  rpc CrearVehiculo(CrearVehiculoRequest) returns (Vehiculo);
+  rpc ActualizarVehiculo(ActualizarVehiculoRequest) returns (Vehiculo);
 }
 
 enum TipoVehiculo {
@@ -67,4 +68,28 @@ message ConsultarDisponibilidadRequest {
 message ActualizarEstadoRequest {
   int32 id = 1;
   EstadoVehiculo estado = 2;
+}
+
+message CrearVehiculoRequest {
+  string patente = 1;
+  string marca = 2;
+  string modelo = 3;
+  int32 anio = 4;
+  optional string color = 5;
+  TipoVehiculo tipo_vehiculo = 6;
+  double precio_diario = 7;
+}
+
+// Actualización parcial: solo se modifican los campos presentes. La patente
+// nunca se incluye acá porque no se puede modificar una vez creado el
+// vehículo. "activo = false" es también cómo se representa la baja lógica.
+message ActualizarVehiculoRequest {
+  int32 id = 1;
+  optional string marca = 2;
+  optional string modelo = 3;
+  optional int32 anio = 4;
+  optional string color = 5;
+  optional TipoVehiculo tipo_vehiculo = 6;
+  optional double precio_diario = 7;
+  optional bool activo = 8;
 }

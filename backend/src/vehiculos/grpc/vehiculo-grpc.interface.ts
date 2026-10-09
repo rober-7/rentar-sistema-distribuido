@@ -25,6 +25,28 @@ export interface ConsultarDisponibilidadGrpcRequest {
   precioMaximo?: number;
 }
 
+export interface CrearVehiculoGrpcRequest {
+  patente: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  color?: string;
+  tipoVehiculo: string;
+  precioDiario: number;
+}
+
+export interface ActualizarVehiculoGrpcRequest {
+  id: number;
+  marca?: string;
+  modelo?: string;
+  anio?: number;
+  // '' (string vacío) limpia la columna a NULL, omitir la clave = no tocar.
+  color?: string;
+  tipoVehiculo?: string;
+  precioDiario?: number;
+  activo?: boolean;
+}
+
 export interface VehiculoServiceGrpcClient {
   listarVehiculos(data: Record<string, never>): Observable<{
     vehiculos: VehiculoGrpc[];
@@ -33,4 +55,8 @@ export interface VehiculoServiceGrpcClient {
   consultarDisponibilidad(
     data: ConsultarDisponibilidadGrpcRequest,
   ): Observable<{ vehiculos: VehiculoGrpc[] }>;
+  crearVehiculo(data: CrearVehiculoGrpcRequest): Observable<VehiculoGrpc>;
+  actualizarVehiculo(
+    data: ActualizarVehiculoGrpcRequest,
+  ): Observable<VehiculoGrpc>;
 }

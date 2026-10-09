@@ -1,12 +1,13 @@
 """Vehicle Service - microservicio gRPC de vehículos (Hito 2, Rentar).
 
-Implementa las 4 operaciones del contrato (ListarVehiculos, ObtenerVehiculo,
-ConsultarDisponibilidad, ActualizarEstado) leyendo/escribiendo directamente la
-base Postgres compartida (tablas "vehiculos" y "reservas").
+Implementa las 6 operaciones del contrato (ListarVehiculos, ObtenerVehiculo,
+ConsultarDisponibilidad, ActualizarEstado, CrearVehiculo, ActualizarVehiculo)
+leyendo/escribiendo directamente la base Postgres compartida (tablas
+"vehiculos" y "reservas").
 
-ListarVehiculos, ObtenerVehiculo y ConsultarDisponibilidad están migrados de
-punta a punta: el Gateway (NestJS) los llama por gRPC en vez de resolverlos
-localmente contra la DB.
+El Gateway (NestJS) ya no tiene ningún provider con acceso directo a la tabla
+"vehiculos": las 5 operaciones del ABM (listar, obtener, crear, actualizar,
+dar de baja) y la consulta de disponibilidad pasan por acá vía gRPC.
 
 ActualizarEstado está implementado y probado directamente por gRPC (no vía
 Gateway, ver test manual en la sesión), pero hoy ningún endpoint del Gateway
@@ -266,6 +267,104 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 f"No existe un vehículo con id {request.id}",
             )
         return _fila_a_pb(v, v["estado"])
+
+    def CrearVehiculo(self, request, context):
+        print(
+            f"[gRPC] CrearVehiculo({request.patente}) invocado por el Gateway",
+            flush=True,
+        )
+        with self.engine.begin() as conn:
+            existente = conn.execute(
+                text("SELECT 1 FROM vehiculos WHERE patente = :patente"),
+                {"patente": request.patente},
+            ).first()
+            if existente is not None:
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Ya existe un vehículo con la patente {request.patente}",
+                )
+
+            v = conn.execute(
+                text(
+                    """
+                    INSERT INTO vehiculos
+                        (patente, marca, modelo, anio, color, "tipoVehiculo",
+                         "precioDiario", estado, activo, "creadoEn", "actualizadoEn")
+                    VALUES
+                        (:patente, :marca, :modelo, :anio, :color, :tipo_vehiculo,
+                         :precio_diario, 'DISPONIBLE', true, now(), now())
+                    RETURNING id, patente, marca, modelo, anio, color,
+                              "tipoVehiculo", "precioDiario", estado, activo,
+                              "creadoEn", "actualizadoEn"
+                    """
+                ),
+                {
+                    "patente": request.patente,
+                    "marca": request.marca,
+                    "modelo": request.modelo,
+                    "anio": request.anio,
+                    "color": request.color if request.HasField("color") else None,
+                    "tipo_vehiculo": pb.TipoVehiculo.Name(request.tipo_vehiculo),
+                    "precio_diario": request.precio_diario,
+                },
+            ).mappings().first()
+
+        return _fila_a_pb(v, "DISPONIBLE")
+
+    def ActualizarVehiculo(self, request, context):
+        print(
+            f"[gRPC] ActualizarVehiculo({request.id}) invocado por el Gateway",
+            flush=True,
+        )
+        # La patente nunca se modifica (no está en el request). Para "color",
+        # protobuf optional no distingue "ausente" de "null": usamos la
+        # convención de que un string vacío presente ("") limpia la columna a
+        # NULL, mientras que el campo ausente significa "no tocar".
+        sets = ['"actualizadoEn" = now()']
+        parametros: dict = {"id": request.id}
+
+        if request.HasField("marca"):
+            sets.append("marca = :marca")
+            parametros["marca"] = request.marca
+        if request.HasField("modelo"):
+            sets.append("modelo = :modelo")
+            parametros["modelo"] = request.modelo
+        if request.HasField("anio"):
+            sets.append("anio = :anio")
+            parametros["anio"] = request.anio
+        if request.HasField("color"):
+            sets.append("color = :color")
+            parametros["color"] = request.color or None
+        if request.HasField("tipo_vehiculo"):
+            sets.append('"tipoVehiculo" = :tipo_vehiculo')
+            parametros["tipo_vehiculo"] = pb.TipoVehiculo.Name(
+                request.tipo_vehiculo
+            )
+        if request.HasField("precio_diario"):
+            sets.append('"precioDiario" = :precio_diario')
+            parametros["precio_diario"] = request.precio_diario
+        if request.HasField("activo"):
+            sets.append("activo = :activo")
+            parametros["activo"] = request.activo
+
+        sql = f"""
+            UPDATE vehiculos
+            SET {', '.join(sets)}
+            WHERE id = :id
+            RETURNING id, patente, marca, modelo, anio, color,
+                      "tipoVehiculo", "precioDiario", estado, activo,
+                      "creadoEn", "actualizadoEn"
+        """
+
+        with self.engine.begin() as conn:
+            v = conn.execute(text(sql), parametros).mappings().first()
+            if v is None:
+                context.abort(
+                    grpc.StatusCode.NOT_FOUND,
+                    f"No existe un vehículo con id {request.id}",
+                )
+            estado = _derivar_estados(conn, [v["id"]])[v["id"]]
+        return _fila_a_pb(v, estado)
 
 
 def main():
