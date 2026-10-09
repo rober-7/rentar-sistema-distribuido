@@ -29,9 +29,9 @@ importeTotal. El importe se calcula en el servidor y queda guardado en la reserv
   no hay un registro de alquiler con fecha de devolución que permita determinar
   cuándo se liberará. La consulta de disponibilidad sigue el mismo criterio.
 - El estado del vehículo (DISPONIBLE/RESERVADO/EN_ALQUILER) no se guarda: se calcula
-  al leer el vehículo a partir de sus reservas CONFIRMADAS vigentes (ver
-  `VehiculosService`). Así, cancelar una reserva o que termine su período no puede
-  dejar el campo desactualizado.
+  al leer el vehículo a partir de sus reservas CONFIRMADAS vigentes. Desde el Hito 2
+  esa derivación vive en `services/vehicle-service` (Python), no acá. Así, cancelar
+  una reserva o que termine su período no puede dejar el campo desactualizado.
 - La transacción bloquea el vehículo antes de consultar solapamientos e insertar.
   Dos altas simultáneas por este servicio no pueden confirmar el mismo período.
 - El cliente se recibe como ID porque este módulo todavía no tiene autenticación.
