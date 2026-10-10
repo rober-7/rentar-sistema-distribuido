@@ -35,6 +35,15 @@ export class DisponibilidadService implements OnModuleInit {
         'La fecha de finalización debe ser posterior a la fecha de inicio',
       );
     }
+    if (
+      filtro.precioMinimo !== undefined &&
+      filtro.precioMaximo !== undefined &&
+      filtro.precioMinimo > filtro.precioMaximo
+    ) {
+      throw new BadRequestException(
+        'precioMinimo no puede ser mayor que precioMaximo',
+      );
+    }
 
     // El filtrado de disponibilidad (qué vehículos están libres en el
     // período, con sus filtros de marca/modelo/tipo/precio) es una regla del
