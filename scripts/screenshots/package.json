@@ -1,0 +1,12 @@
+{
+  "name": "rentar-screenshots",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Genera las capturas de pantalla para la documentación del Hito 2 (no es parte de la app, es una herramienta de uso puntual).",
+  "scripts": {
+    "capturar": "node capturar.js"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}
