@@ -57,12 +57,27 @@ export interface EliminarClienteGrpcRequest {
   id: number;
 }
 
+export interface ValidarLoginGrpcRequest {
+  email: string;
+  password: string;
+}
+
+export interface ValidarLoginGrpcResponse {
+  valido: boolean;
+  id?: number;
+  email?: string;
+  rol?: string;
+}
+
 export interface ClienteServiceGrpcClient {
   listarClientes(data: ListarClientesGrpcRequest): Observable<{ clientes: ClienteGrpc[] }>;
   obtenerCliente(data: ObtenerClienteGrpcRequest): Observable<ClienteGrpc>;
   verificarExistencia(data: VerificarExistenciaGrpcRequest): Observable<VerificarExistenciaGrpcResponse>;
   verificarActivo(data: VerificarActivoGrpcRequest): Observable<VerificarActivoGrpcResponse>;
-  crearCliente(data: CrearClienteGrpcRequest): Observable<ClienteGrpc>;
+  crearCliente(
+    data: CrearClienteGrpcRequest & { rol?: string },
+  ): Observable<ClienteGrpc>;
   actualizarCliente(data: ActualizarClienteGrpcRequest): Observable<ClienteGrpc>;
   eliminarCliente(data: EliminarClienteGrpcRequest): Observable<ClienteGrpc>;
+  validarLogin(data: ValidarLoginGrpcRequest): Observable<ValidarLoginGrpcResponse>;
 }
