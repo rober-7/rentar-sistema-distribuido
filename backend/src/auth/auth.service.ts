@@ -3,15 +3,14 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ClientesService } from '../clientes/clientes.service';
 import { Usuario } from '../clientes/entities/usuario.entity';
 import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
 import { AuthenticatedUser } from './interfaces/authenticated-user.interface';
 @Injectable()
 export class AuthService implements OnModuleInit {
   constructor(
-    private readonly clientes: ClientesService,
     private readonly jwt: JwtService,
+    // El AuthService interactúa directo con la tabla para temas de Login
     @InjectRepository(Usuario) private readonly usuarios: Repository<Usuario>,
   ) {}
   async onModuleInit() {
@@ -35,7 +34,12 @@ export class AuthService implements OnModuleInit {
       );
   }
   async login(email: string, password: string) {
-    const usuario = await this.clientes.findByEmailWithPassword(email);
+    // Buscamos el usuario directamente desde este repositorio
+    const usuario = await this.usuarios
+      .createQueryBuilder('usuario')
+      .addSelect('usuario.passwordHash')
+      .where('LOWER(usuario.email) = LOWER(:email)', { email })
+      .getOne();
     if (
       !usuario ||
       !usuario.activo ||
@@ -55,5 +59,8 @@ export class AuthService implements OnModuleInit {
       }),
       usuario: user,
     };
+  }
+  async findActiveUser(id: number): Promise<Usuario | null> {
+    return this.usuarios.findOne({ where: { id, activo: true } });
   }
 }

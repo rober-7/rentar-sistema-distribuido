@@ -46,6 +46,26 @@ services:
       db:
         condition: service_healthy
 
+  customer_service:
+    build:
+      context: ./services/customer-service
+      dockerfile: Dockerfile
+    container_name: rentar_customer_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: rentar
+      DB_PASSWORD: rentar
+      DB_NAME: rentar_db
+      GRPC_PORT: 50052
+    volumes:
+      - ./services/customer-service:/app
+      - ./proto:/app/proto
+    depends_on:
+      db:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -62,6 +82,7 @@ services:
       - ./backend/.env
     environment:
       VEHICLE_SERVICE_URL: vehicle_service:50051
+      CUSTOMER_SERVICE_URL: customer_service:50052
     depends_on:
       db:
         condition: service_healthy

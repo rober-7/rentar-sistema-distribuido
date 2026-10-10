@@ -9,6 +9,9 @@ service ClienteService {
   rpc ObtenerCliente(ObtenerClienteRequest) returns (Cliente);
   rpc VerificarExistencia(VerificarExistenciaRequest) returns (VerificarExistenciaResponse);
   rpc VerificarActivo(VerificarActivoRequest) returns (VerificarActivoResponse);
+  rpc CrearCliente (CrearClienteRequest) returns (Cliente);
+  rpc ActualizarCliente (ActualizarClienteRequest) returns (Cliente);
+  rpc EliminarCliente (EliminarClienteRequest) returns (Cliente);
 }
 
 message Cliente {
@@ -46,4 +49,28 @@ message VerificarActivoRequest {
 
 message VerificarActivoResponse {
   bool activo = 1;
+}
+
+message CrearClienteRequest {
+  string documento = 1;
+  string nombre = 2;
+  string apellido = 3;
+  string email = 4;
+  string telefono = 5;
+  string fecha_nacimiento = 6;
+  string password = 7;
+}
+
+message ActualizarClienteRequest {
+  int32 id = 1;
+  // optional permite que si no mandan el campo, no se sobreescriba
+  optional string nombre = 2;
+  optional string apellido = 3;
+  optional string telefono = 4;
+  optional string fecha_nacimiento = 5;
+  optional bool activo = 6;
+}
+
+message EliminarClienteRequest {
+  int32 id = 1;
 }
