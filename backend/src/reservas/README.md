@@ -25,8 +25,8 @@ importeTotal. El importe se calcula en el servidor y queda guardado en la reserv
 ## Reglas
 
 - 400: IDs o fechas inválidos, inicio no futuro, finalización no posterior al inicio.
-- 404: cliente o vehículo inexistente.
-- 409: cliente o vehículo inactivo, vehículo EN_ALQUILER o período ocupado.
+- 404: cliente inexistente o inactivo, o vehículo inexistente.
+- 409: vehículo inactivo o EN_ALQUILER, o período ocupado.
 - Sólo las reservas activas y CONFIRMADAS bloquean fechas. CANCELADA no bloquea.
 - Los intervalos son [inicio, fin): se permiten reservas consecutivas.
 - El TP no especifica cómo cobrar fracciones de día. Se adoptan bloques de 24 horas

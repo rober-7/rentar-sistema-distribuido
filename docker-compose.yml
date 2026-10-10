@@ -109,6 +109,8 @@ services:
         condition: service_healthy
       vehicle_service:
         condition: service_started
+      customer_service:
+        condition: service_started
       rental_service:
         condition: service_started
 
