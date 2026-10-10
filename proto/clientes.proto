@@ -3,7 +3,6 @@ syntax = "proto3";
 package clientes;
 
 // Customer Service - gestiona el dominio de clientes (Hito 2).
-// Contrato definido para esta entrega; implementación en un paso futuro.
 service ClienteService {
   rpc ListarClientes(ListarClientesRequest) returns (ListarClientesResponse);
   rpc ObtenerCliente(ObtenerClienteRequest) returns (Cliente);
@@ -12,6 +11,10 @@ service ClienteService {
   rpc CrearCliente (CrearClienteRequest) returns (Cliente);
   rpc ActualizarCliente (ActualizarClienteRequest) returns (Cliente);
   rpc EliminarCliente (EliminarClienteRequest) returns (Cliente);
+  // Usado por el Gateway para el login: el Customer Service es el único que
+  // conoce passwordHash, la comparación bcrypt se hace acá adentro y nunca
+  // viaja el hash por la red.
+  rpc ValidarLogin (ValidarLoginRequest) returns (ValidarLoginResponse);
 }
 
 message Cliente {
@@ -59,6 +62,11 @@ message CrearClienteRequest {
   string telefono = 5;
   string fecha_nacimiento = 6;
   string password = 7;
+  // Si no se manda, el servicio lo crea como CLIENTE (comportamiento
+  // original). El DTO REST público (POST /clientes) nunca expone este
+  // campo; solo lo usa el bootstrap interno del Gateway para crear el
+  // usuario ADMIN inicial.
+  optional string rol = 8;
 }
 
 message ActualizarClienteRequest {
@@ -73,4 +81,16 @@ message ActualizarClienteRequest {
 
 message EliminarClienteRequest {
   int32 id = 1;
+}
+
+message ValidarLoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message ValidarLoginResponse {
+  bool valido = 1;
+  optional int32 id = 2;
+  optional string email = 3;
+  optional string rol = 4;
 }

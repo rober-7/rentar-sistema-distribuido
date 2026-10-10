@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthService } from './auth.service';
@@ -21,7 +21,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     email: string;
     rol: RolUsuario;
   }): Promise<AuthenticatedUser> {
-    const usuario = await this.authService.findActiveUser(payload.sub);
-    return { id: usuario.id, email: usuario.email, rol: usuario.rol };
+    // El payload del JWT ya viene firmado por este mismo Gateway (confiable):
+    // no hace falta volver a pedirle email/rol al Customer Service en cada
+    // request, solo confirmar que el usuario siga existiendo y activo (por
+    // si se desactivó la cuenta después de emitido el token).
+    const activo = await this.authService.usuarioSigueActivo(payload.sub);
+    if (!activo) {
+      throw new UnauthorizedException('Usuario inactivo o inexistente');
+    }
+    return { id: payload.sub, email: payload.email, rol: payload.rol };
   }
 }

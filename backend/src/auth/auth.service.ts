@@ -1,55 +1,61 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Usuario } from '../clientes/entities/usuario.entity';
-import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
+import { ClientGrpc } from '@nestjs/microservices';
+import { status as GrpcStatus } from '@grpc/grpc-js';
+import { firstValueFrom } from 'rxjs';
+import { CLIENTE_PACKAGE } from '../clientes/clientes.constants';
+import { ClienteServiceGrpcClient } from '../clientes/grpc/cliente-grpc.interface';
 import { AuthenticatedUser } from './interfaces/authenticated-user.interface';
+
 @Injectable()
 export class AuthService implements OnModuleInit {
+  private clienteGrpc: ClienteServiceGrpcClient;
+
   constructor(
     private readonly jwt: JwtService,
-    // El AuthService interactúa directo con la tabla para temas de Login
-    @InjectRepository(Usuario) private readonly usuarios: Repository<Usuario>,
+    @Inject(CLIENTE_PACKAGE) private readonly grpcClient: ClientGrpc,
   ) {}
+
   async onModuleInit() {
+    this.clienteGrpc =
+      this.grpcClient.getService<ClienteServiceGrpcClient>('ClienteService');
+
     const email = process.env.ADMIN_EMAIL;
     const password = process.env.ADMIN_PASSWORD;
     if (!email || !password) return;
-    const existe = await this.usuarios.findOne({ where: { email } });
-    if (!existe)
-      await this.usuarios.save(
-        this.usuarios.create({
+
+    // Bootstrap idempotente: se intenta crear en cada arranque y se ignora
+    // el 409/ALREADY_EXISTS si el admin ya existe. Pasa por el mismo
+    // CrearCliente que usa el ABM, con rol explícito en ADMIN (el DTO REST
+    // público nunca expone ese campo, así que nadie más puede setearlo).
+    try {
+      await firstValueFrom(
+        this.clienteGrpc.crearCliente({
           documento: process.env.ADMIN_DOCUMENTO ?? '40123123',
           nombre: process.env.ADMIN_NOMBRE ?? 'Juan',
           apellido: process.env.ADMIN_APELLIDO ?? 'Pérez',
           email,
-          passwordHash: await bcrypt.hash(password, 12),
-          rol: RolUsuario.ADMIN,
-          activo: true,
-          telefono: null,
+          password,
+          telefono: undefined,
           fechaNacimiento: '2000-01-01',
+          rol: 'ADMIN',
         }),
       );
+    } catch (error) {
+      if (error?.code !== GrpcStatus.ALREADY_EXISTS) throw error;
+    }
   }
+
   async login(email: string, password: string) {
-    // Buscamos el usuario directamente desde este repositorio
-    const usuario = await this.usuarios
-      .createQueryBuilder('usuario')
-      .addSelect('usuario.passwordHash')
-      .where('LOWER(usuario.email) = LOWER(:email)', { email })
-      .getOne();
-    if (
-      !usuario ||
-      !usuario.activo ||
-      !(await bcrypt.compare(password, usuario.passwordHash))
-    )
-      return null;
+    const respuesta = await firstValueFrom(
+      this.clienteGrpc.validarLogin({ email, password }),
+    );
+    if (!respuesta.valido) return null;
+
     const user: AuthenticatedUser = {
-      id: usuario.id,
-      email: usuario.email,
-      rol: usuario.rol,
+      id: respuesta.id,
+      email: respuesta.email,
+      rol: respuesta.rol as AuthenticatedUser['rol'],
     };
     return {
       accessToken: await this.jwt.signAsync({
@@ -60,7 +66,17 @@ export class AuthService implements OnModuleInit {
       usuario: user,
     };
   }
-  async findActiveUser(id: number): Promise<Usuario | null> {
-    return this.usuarios.findOne({ where: { id, activo: true } });
+
+  /** Usado por JwtStrategy en cada request autenticado. */
+  async usuarioSigueActivo(id: number): Promise<boolean> {
+    try {
+      const { activo } = await firstValueFrom(
+        this.clienteGrpc.verificarActivo({ id }),
+      );
+      return activo;
+    } catch (error) {
+      if (error?.code === GrpcStatus.NOT_FOUND) return false;
+      throw error;
+    }
   }
 }

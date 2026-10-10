@@ -1,8 +1,11 @@
 """Customer Service - microservicio gRPC de clientes (Hito 2, Rentar).
 
-Implementa las 4 operaciones del contrato (ListarClientes, ObtenerCliente,
-VerificarExistencia, VerificarActivo) leyendo directamente la base de 
-datos Postgres compartida (tabla "clientes").
+Implementa las operaciones del contrato leyendo/escribiendo directamente la
+base de datos Postgres compartida (tabla "usuarios").
+
+ValidarLogin permite que el Gateway deje de acceder directamente a esta
+tabla para el login: la comparación bcrypt de la contraseña se hace acá
+adentro, el passwordHash nunca sale de este servicio.
 """
 
 import os
@@ -155,18 +158,21 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
             ).first()
             if existente:
                 context.abort(grpc.StatusCode.ALREADY_EXISTS, "Ya existe un cliente con ese documento o email")
-            
+
             # 2. Hashear la contraseña usando bcrypt
             salt = bcrypt.gensalt(12)
             hashed_pw = bcrypt.hashpw(request.password.encode('utf-8'), salt).decode('utf-8')
 
-            # 3. Insertar
+            # 3. Insertar. "rol" es opcional (default CLIENTE) para no romper
+            # el flujo normal de alta; solo el bootstrap interno del Gateway
+            # lo manda explícitamente en 'ADMIN'.
+            rol = request.rol if request.HasField("rol") else "CLIENTE"
             c = conn.execute(
                 text("""
-                    INSERT INTO usuarios 
+                    INSERT INTO usuarios
                         (documento, nombre, apellido, email, telefono, "fechaNacimiento", "passwordHash", rol, activo)
-                    VALUES 
-                        (:doc, :nom, :ape, :email, :tel, :fNac, :pw, 'CLIENTE', true)
+                    VALUES
+                        (:doc, :nom, :ape, :email, :tel, :fNac, :pw, :rol, true)
                     RETURNING id, documento, nombre, apellido, email, telefono, "fechaNacimiento", activo
                 """),
                 {
@@ -176,10 +182,40 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
                     "email": request.email,
                     "tel": request.telefono if request.telefono else None,
                     "fNac": request.fecha_nacimiento if request.fecha_nacimiento else None,
-                    "pw": hashed_pw
+                    "pw": hashed_pw,
+                    "rol": rol,
                 }
             ).mappings().first()
             return _fila_a_pb(c)
+
+    def ValidarLogin(self, request, context):
+        print(f"[gRPC] ValidarLogin({request.email}) invocado", flush=True)
+        with self.engine.connect() as conn:
+            u = conn.execute(
+                text(
+                    """
+                    SELECT id, email, rol, activo, "passwordHash"
+                    FROM usuarios
+                    WHERE LOWER(email) = LOWER(:email)
+                    """
+                ),
+                {"email": request.email},
+            ).mappings().first()
+
+        credenciales_validas = (
+            u is not None
+            and u["activo"]
+            and bcrypt.checkpw(
+                request.password.encode("utf-8"),
+                u["passwordHash"].encode("utf-8"),
+            )
+        )
+        if not credenciales_validas:
+            return pb.ValidarLoginResponse(valido=False)
+
+        return pb.ValidarLoginResponse(
+            valido=True, id=u["id"], email=u["email"], rol=u["rol"]
+        )
 
     def ActualizarCliente(self, request, context):
         print(f"[gRPC] ActualizarCliente({request.id}) invocado", flush=True)
