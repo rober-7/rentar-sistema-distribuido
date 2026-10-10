@@ -1,0 +1,1 @@
+export const RENTAL_PACKAGE = 'RENTAL_PACKAGE';

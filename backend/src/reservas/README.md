@@ -1,4 +1,11 @@
-# Alta de reserva — Hito 1, punto 4
+# Reservas — Hito 1, punto 4 / Hito 2, punto 4
+
+El API Gateway conserva los endpoints REST y GraphQL, pero las operaciones de
+reservas y el historial se ejecutan en `services/rental-service` mediante gRPC.
+Al crear, el Gateway consulta el estado del cliente y la disponibilidad del
+vehículo por gRPC antes de solicitar la reserva. El contrato está en
+`proto/reservas.proto`; Docker Compose publica el servicio internamente en
+`rental_service:50053`.
 
 `POST /reservas`, documentado en `/api/docs`.
 
@@ -18,8 +25,8 @@ importeTotal. El importe se calcula en el servidor y queda guardado en la reserv
 ## Reglas
 
 - 400: IDs o fechas inválidos, inicio no futuro, finalización no posterior al inicio.
-- 404: cliente o vehículo inexistente.
-- 409: cliente o vehículo inactivo, vehículo EN_ALQUILER o período ocupado.
+- 404: cliente inexistente o inactivo, o vehículo inexistente.
+- 409: vehículo inactivo o EN_ALQUILER, o período ocupado.
 - Sólo las reservas activas y CONFIRMADAS bloquean fechas. CANCELADA no bloquea.
 - Los intervalos son [inicio, fin): se permiten reservas consecutivas.
 - El TP no especifica cómo cobrar fracciones de día. Se adoptan bloques de 24 horas
