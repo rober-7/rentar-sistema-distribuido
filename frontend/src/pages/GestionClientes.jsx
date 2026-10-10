@@ -20,6 +20,15 @@ const FORM_INICIAL = {
   activo: true,
 };
 
+const FECHA_MINIMA_NACIMIENTO = "1900-01-01";
+
+const obtenerFechaActual = () => {
+  const fecha = new Date();
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  return `${fecha.getFullYear()}-${mes}-${dia}`;
+};
+
 export default function GestionClientes() {
   const [clientes, setClientes] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -79,6 +88,20 @@ export default function GestionClientes() {
   };
 
   const handleGuardar = async () => {
+    if (
+      !formData.fechaNacimiento ||
+      formData.fechaNacimiento < FECHA_MINIMA_NACIMIENTO ||
+      formData.fechaNacimiento > obtenerFechaActual()
+    ) {
+      Swal.fire({
+        title: "Fecha de nacimiento inválida",
+        text: "Ingresá una fecha entre el 01/01/1900 y hoy.",
+        icon: "error",
+        confirmButtonColor: "#dc3545",
+      });
+      return;
+    }
+
     try {
       const clienteFormateado = {
         ...formData,
@@ -257,6 +280,9 @@ export default function GestionClientes() {
                     name="fechaNacimiento"
                     value={formData.fechaNacimiento}
                     onChange={handleChange}
+                    min={FECHA_MINIMA_NACIMIENTO}
+                    max={obtenerFechaActual()}
+                    required
                   />
                 </Form.Group>
               </div>

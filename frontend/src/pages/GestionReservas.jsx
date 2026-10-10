@@ -20,6 +20,16 @@ const FILTRO_INICIAL = {
   hasta: '',
 };
 
+const FORMATO_FECHA_HORA = {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+};
+
 export default function GestionReservas() {
   const [filtro, setFiltro] = useState(FILTRO_INICIAL);
   const [clientes, setClientes] = useState([]);
@@ -160,8 +170,8 @@ export default function GestionReservas() {
                   <td>{r.cliente}</td>
                   <td>{r.vehiculo}</td>
                   <td>{r.patente}</td>
-                  <td>{new Date(r.fechaInicio).toLocaleString()}</td>
-                  <td>{new Date(r.fechaFinalizacion).toLocaleString()}</td>
+                  <td>{new Date(r.fechaInicio).toLocaleString('es-AR', FORMATO_FECHA_HORA)}</td>
+                  <td>{new Date(r.fechaFinalizacion).toLocaleString('es-AR', FORMATO_FECHA_HORA)}</td>
                   <td>${r.precioDiario}</td>
                   <td className="fw-bold">${r.importeTotal}</td>
                   <td>
