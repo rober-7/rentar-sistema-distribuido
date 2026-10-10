@@ -38,6 +38,11 @@ import {
 @ApiBearerAuth()
 @Authenticated()
 @Roles(RolUsuario.ADMIN)
+@ApiResponse({ status: 401, description: 'Falta el JWT o es inválido/expiró' })
+@ApiResponse({
+  status: 403,
+  description: 'El usuario autenticado no tiene rol ADMIN',
+})
 @Controller('clientes')
 export class ClientesController implements OnModuleInit {
   private clienteGrpcService: ClienteServiceGrpcClient;
@@ -54,6 +59,13 @@ export class ClientesController implements OnModuleInit {
   @Post()
   @ApiOperation({ summary: 'Da de alta un cliente (vía Customer Service, gRPC)' })
   @ApiResponse({ status: 201, description: 'Cliente creado', type: Usuario })
+  @ApiResponse({
+    status: 400,
+    description:
+      'DTO inválido: email mal formado, password de menos de 8 ' +
+      'caracteres, fechaNacimiento no es una fecha ISO válida, o falta ' +
+      'algún campo obligatorio',
+  })
   @ApiResponse({
     status: 409,
     description: 'Ya existe un cliente con ese documento o email',
@@ -96,6 +108,10 @@ export class ClientesController implements OnModuleInit {
     description: 'Cliente encontrado',
     type: Usuario,
   })
+  @ApiResponse({
+    status: 400,
+    description: 'El id de la URL no es un número entero',
+  })
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<ClienteGrpc> {
     try {
@@ -119,6 +135,12 @@ export class ClientesController implements OnModuleInit {
     status: 200,
     description: 'Cliente actualizado',
     type: Usuario,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'El id de la URL no es un número entero, o el DTO tiene campos ' +
+      'inválidos (ej. email mal formado)',
   })
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
   async update(
@@ -144,6 +166,10 @@ export class ClientesController implements OnModuleInit {
     status: 200,
     description: 'Cliente dado de baja',
     type: Usuario,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'El id de la URL no es un número entero',
   })
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
   async remove(@Param('id', ParseIntPipe) id: number): Promise<ClienteGrpc> {

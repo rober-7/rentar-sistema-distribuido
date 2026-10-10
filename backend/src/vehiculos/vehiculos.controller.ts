@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Inject,
+  InternalServerErrorException,
   NotFoundException,
   OnModuleInit,
   Param,
@@ -38,6 +39,17 @@ import {
 @ApiBearerAuth()
 @Authenticated()
 @Roles(RolUsuario.ADMIN)
+@ApiResponse({ status: 401, description: 'Falta el JWT o es inválido/expiró' })
+@ApiResponse({
+  status: 403,
+  description: 'El usuario autenticado no tiene rol ADMIN',
+})
+@ApiResponse({
+  status: 500,
+  description:
+    'El Vehicle Service respondió con un error gRPC no contemplado ' +
+    '(ej. no disponible, timeout, error interno)',
+})
 @Controller('vehiculos')
 export class VehiculosController implements OnModuleInit {
   private vehiculoGrpcService: VehiculoServiceGrpcClient;
@@ -60,6 +72,12 @@ export class VehiculosController implements OnModuleInit {
   })
   @ApiResponse({ status: 201, description: 'Vehículo creado', type: Vehiculo })
   @ApiResponse({
+    status: 400,
+    description:
+      'DTO inválido: año fuera de rango, tipoVehiculo no es un valor del ' +
+      'enum, precioDiario no es positivo, o falta algún campo obligatorio',
+  })
+  @ApiResponse({
     status: 409,
     description: 'Ya existe un vehículo con esa patente',
   })
@@ -76,7 +94,7 @@ export class VehiculosController implements OnModuleInit {
           `Ya existe un vehículo con la patente ${createVehiculoDto.patente}`,
         );
       }
-      throw error;
+      this.lanzarErrorGrpc(error, 'CrearVehiculo');
     }
   }
 
@@ -90,10 +108,14 @@ export class VehiculosController implements OnModuleInit {
     type: [Vehiculo],
   })
   async findAll(): Promise<VehiculoGrpc[]> {
-    const { vehiculos } = await firstValueFrom(
-      this.vehiculoGrpcService.listarVehiculos({}),
-    );
-    return vehiculos;
+    try {
+      const { vehiculos } = await firstValueFrom(
+        this.vehiculoGrpcService.listarVehiculos({}),
+      );
+      return vehiculos;
+    } catch (error) {
+      this.lanzarErrorGrpc(error, 'ListarVehiculos');
+    }
   }
 
   @Get(':id')
@@ -106,6 +128,10 @@ export class VehiculosController implements OnModuleInit {
     description: 'Vehículo encontrado',
     type: Vehiculo,
   })
+  @ApiResponse({
+    status: 400,
+    description: 'El id de la URL no es un número entero',
+  })
   @ApiResponse({ status: 404, description: 'No existe un vehículo con ese id' })
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<VehiculoGrpc> {
     try {
@@ -116,7 +142,7 @@ export class VehiculosController implements OnModuleInit {
       if (error?.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
       }
-      throw error;
+      this.lanzarErrorGrpc(error, 'ObtenerVehiculo');
     }
   }
 
@@ -130,6 +156,12 @@ export class VehiculosController implements OnModuleInit {
     status: 200,
     description: 'Vehículo actualizado',
     type: Vehiculo,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'El id de la URL no es un número entero, o el DTO tiene campos ' +
+      'inválidos (ej. tipoVehiculo fuera del enum, precioDiario negativo)',
   })
   @ApiResponse({ status: 404, description: 'No existe un vehículo con ese id' })
   async update(
@@ -149,6 +181,10 @@ export class VehiculosController implements OnModuleInit {
     status: 200,
     description: 'Vehículo dado de baja',
     type: Vehiculo,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'El id de la URL no es un número entero',
   })
   @ApiResponse({ status: 404, description: 'No existe un vehículo con ese id' })
   async remove(
@@ -178,7 +214,20 @@ export class VehiculosController implements OnModuleInit {
       if (error?.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
       }
-      throw error;
+      this.lanzarErrorGrpc(error, 'ActualizarVehiculo');
     }
+  }
+
+  /**
+   * Cualquier error gRPC no contemplado explícitamente (servicio caído,
+   * timeout, INTERNAL, etc.) se traduce a un 500 con mensaje claro en vez
+   * de dejar que la excepción cruda de gRPC llegue al filtro por defecto
+   * de Nest.
+   */
+  private lanzarErrorGrpc(error: any, operacion: string): never {
+    throw new InternalServerErrorException(
+      `Vehicle Service no pudo completar ${operacion}: ` +
+        (error?.details ?? error?.message ?? 'error desconocido'),
+    );
   }
 }
