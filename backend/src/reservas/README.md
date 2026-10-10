@@ -1,4 +1,11 @@
-# Alta de reserva — Hito 1, punto 4
+# Reservas — Hito 1, punto 4 / Hito 2, punto 4
+
+El API Gateway conserva los endpoints REST y GraphQL, pero las operaciones de
+reservas y el historial se ejecutan en `services/rental-service` mediante gRPC.
+Al crear, el Gateway consulta el estado del cliente y la disponibilidad del
+vehículo por gRPC antes de solicitar la reserva. El contrato está en
+`proto/reservas.proto`; Docker Compose publica el servicio internamente en
+`rental_service:50053`.
 
 `POST /reservas`, documentado en `/api/docs`.
 
