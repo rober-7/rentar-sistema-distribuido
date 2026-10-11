@@ -1,9 +1,8 @@
 """Vehicle Service - microservicio gRPC de vehículos (Hito 2, Rentar).
 
-Implementa las 6 operaciones del contrato (ListarVehiculos, ObtenerVehiculo,
-ConsultarDisponibilidad, ActualizarEstado, CrearVehiculo, ActualizarVehiculo)
-leyendo/escribiendo directamente la base Postgres compartida (tablas
-"vehiculos" y "reservas").
+Implementa las operaciones del dominio leyendo y escribiendo exclusivamente
+su propia base PostgreSQL (tabla "vehiculos"). La disponibilidad temporal y
+los estados derivados de reservas pertenecen a Rental Service.
 
 El Gateway (NestJS) ya no tiene ningún provider con acceso directo a la tabla
 "vehiculos": las 5 operaciones del ABM (listar, obtener, crear, actualizar,
@@ -19,7 +18,6 @@ con el derive-on-read de estado.
 import os
 import sys
 from concurrent import futures
-from datetime import datetime, timezone
 
 import grpc
 from grpc_tools import protoc
@@ -62,47 +60,7 @@ def engine_desde_env():
     return create_engine(url, pool_pre_ping=True)
 
 
-def _derivar_estados(conn, vehiculo_ids: list[int]) -> dict[int, str]:
-    """Deriva DISPONIBLE/RESERVADO/EN_ALQUILER según las reservas CONFIRMADAS
-    vigentes de cada vehículo (misma regla que antes vivía en VehiculosService
-    del Gateway)."""
-    if not vehiculo_ids:
-        return {}
-
-    reservas_vigentes = conn.execute(
-        text(
-            """
-            SELECT vehiculo_id, "fechaInicio"
-            FROM reservas
-            WHERE activo = true
-              AND estado = 'CONFIRMADA'
-              AND "fechaFinalizacion" > now()
-              AND vehiculo_id = ANY(:ids)
-            """
-        ),
-        {"ids": vehiculo_ids},
-    ).mappings().all()
-
-    inicios_por_vehiculo: dict[int, list[datetime]] = {}
-    for r in reservas_vigentes:
-        inicios_por_vehiculo.setdefault(r["vehiculo_id"], []).append(
-            r["fechaInicio"]
-        )
-
-    ahora = datetime.now(timezone.utc)
-    estados: dict[int, str] = {}
-    for vid in vehiculo_ids:
-        inicios = inicios_por_vehiculo.get(vid, [])
-        if any(i <= ahora for i in inicios):
-            estados[vid] = "EN_ALQUILER"
-        elif inicios:
-            estados[vid] = "RESERVADO"
-        else:
-            estados[vid] = "DISPONIBLE"
-    return estados
-
-
-def _fila_a_pb(v, estado_derivado: str) -> pb.Vehiculo:
+def _fila_a_pb(v) -> pb.Vehiculo:
     vehiculo_pb = pb.Vehiculo()
     vehiculo_pb.id = v["id"]
     vehiculo_pb.patente = v["patente"]
@@ -113,7 +71,7 @@ def _fila_a_pb(v, estado_derivado: str) -> pb.Vehiculo:
         vehiculo_pb.color = v["color"]
     vehiculo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(v["tipoVehiculo"])
     vehiculo_pb.precio_diario = float(v["precioDiario"])
-    vehiculo_pb.estado = pb.EstadoVehiculo.Value(estado_derivado)
+    vehiculo_pb.estado = pb.EstadoVehiculo.Value(v["estado"])
     vehiculo_pb.activo = v["activo"]
     vehiculo_pb.creado_en = v["creadoEn"].isoformat()
     vehiculo_pb.actualizado_en = v["actualizadoEn"].isoformat()
@@ -137,11 +95,9 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     """
                 )
             ).mappings().all()
-            estados = _derivar_estados(conn, [v["id"] for v in vehiculos])
-
         respuesta = pb.ListarVehiculosResponse()
         for v in vehiculos:
-            respuesta.vehiculos.append(_fila_a_pb(v, estados[v["id"]]))
+            respuesta.vehiculos.append(_fila_a_pb(v))
         return respuesta
 
     def ObtenerVehiculo(self, request, context):
@@ -169,29 +125,15 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     f"No existe un vehículo con id {request.id}",
                 )
 
-            estado = _derivar_estados(conn, [v["id"]])[v["id"]]
-            return _fila_a_pb(v, estado)
+            return _fila_a_pb(v)
 
-    def ConsultarDisponibilidad(self, request, context):
+    def FiltrarVehiculos(self, request, context):
         print(
-            "[gRPC] ConsultarDisponibilidad invocado por el Gateway",
+            "[gRPC] FiltrarVehiculos invocado por el Gateway",
             flush=True,
         )
-        condiciones = [
-            "activo = true",
-            """NOT EXISTS (
-                SELECT 1 FROM reservas r
-                WHERE r.vehiculo_id = vehiculos.id
-                  AND r.activo = true
-                  AND r.estado = 'CONFIRMADA'
-                  AND r."fechaInicio" < :fecha_fin
-                  AND r."fechaFinalizacion" > :fecha_inicio
-            )""",
-        ]
-        parametros = {
-            "fecha_inicio": request.fecha_inicio,
-            "fecha_fin": request.fecha_finalizacion,
-        }
+        condiciones = ["activo = true"]
+        parametros = {}
 
         if request.HasField("tipo_vehiculo"):
             condiciones.append('"tipoVehiculo" = :tipo_vehiculo')
@@ -222,24 +164,12 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         with self.engine.connect() as conn:
             vehiculos = conn.execute(text(sql), parametros).mappings().all()
 
-        # Todos los vehículos que llegan hasta acá ya están filtrados como
-        # disponibles en el período (no tienen reservas CONFIRMADA solapadas).
         respuesta = pb.ListarVehiculosResponse()
         for v in vehiculos:
-            respuesta.vehiculos.append(_fila_a_pb(v, "DISPONIBLE"))
+            respuesta.vehiculos.append(_fila_a_pb(v))
         return respuesta
 
     def ActualizarEstado(self, request, context):
-        # NOTA para quien construya el Rental Service: hoy ListarVehiculos y
-        # ObtenerVehiculo IGNORAN esta columna persistida y recalculan el
-        # estado leyendo "reservas" en cada lectura (_derivar_estados). Este
-        # RPC persiste igual porque el contrato lo pide, pero mientras ese
-        # derive-on-read siga existiendo, lo que escriba acá se pisa en la
-        # próxima consulta. Cuando Rental Service exista y sea el dueño de
-        # "reservas", probablemente convenga que Vehicle Service deje de leer
-        # esa tabla directamente y confíe en este campo persistido (que
-        # Rental Service actualizaría vía este mismo RPC al crear/cancelar
-        # una reserva).
         print(
             f"[gRPC] ActualizarEstado({request.id} -> "
             f"{pb.EstadoVehiculo.Name(request.estado)}) invocado",
@@ -266,7 +196,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 grpc.StatusCode.NOT_FOUND,
                 f"No existe un vehículo con id {request.id}",
             )
-        return _fila_a_pb(v, v["estado"])
+        return _fila_a_pb(v)
 
     def CrearVehiculo(self, request, context):
         print(
@@ -309,7 +239,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 },
             ).mappings().first()
 
-        return _fila_a_pb(v, "DISPONIBLE")
+        return _fila_a_pb(v)
 
     def ActualizarVehiculo(self, request, context):
         print(
@@ -363,8 +293,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     grpc.StatusCode.NOT_FOUND,
                     f"No existe un vehículo con id {request.id}",
                 )
-            estado = _derivar_estados(conn, [v["id"]])[v["id"]]
-        return _fila_a_pb(v, estado)
+        return _fila_a_pb(v)
 
 
 def main():

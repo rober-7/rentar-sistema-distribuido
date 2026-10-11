@@ -4,6 +4,7 @@ export async function login(email, password) {
   const r = await apiFetch(`${URL}/login`, {
     method: "POST",
     body: JSON.stringify({ email, password }),
+    redirectOnUnauthorized: false,
   });
   if (!r.ok)
     throw new Error(await errorMessage(r, "No se pudo iniciar sesión"));

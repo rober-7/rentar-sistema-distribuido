@@ -11,20 +11,24 @@ import { FiltroDisponibilidadInput } from './dto/filtro-disponibilidad.input';
 import { VehiculoDisponible } from './dto/vehiculo-disponible.type';
 import { VEHICULO_PACKAGE } from '../vehiculos/vehiculos.constants';
 import { VehiculoServiceGrpcClient } from '../vehiculos/grpc/vehiculo-grpc.interface';
+import { RENTAL_PACKAGE } from '../reservas/rental.constants';
+import { ReservaServiceGrpcClient } from '../reservas/grpc/reserva-grpc.interface';
 
 @Injectable()
 export class DisponibilidadService implements OnModuleInit {
   private vehiculoGrpcService: VehiculoServiceGrpcClient;
+  private reservaGrpcService: ReservaServiceGrpcClient;
 
   constructor(
     @Inject(VEHICULO_PACKAGE) private readonly grpcClient: ClientGrpc,
+    @Inject(RENTAL_PACKAGE) private readonly rentalClient: ClientGrpc,
   ) {}
 
   onModuleInit() {
     this.vehiculoGrpcService =
-      this.grpcClient.getService<VehiculoServiceGrpcClient>(
-        'VehiculoService',
-      );
+      this.grpcClient.getService<VehiculoServiceGrpcClient>('VehiculoService');
+    this.reservaGrpcService =
+      this.rentalClient.getService<ReservaServiceGrpcClient>('ReservaService');
   }
 
   async buscar(
@@ -45,38 +49,45 @@ export class DisponibilidadService implements OnModuleInit {
       );
     }
 
-    // El filtrado de disponibilidad (qué vehículos están libres en el
-    // período, con sus filtros de marca/modelo/tipo/precio) es una regla del
-    // dominio Vehículos y vive en el Vehicle Service. El Gateway solo arma
-    // la respuesta para la interfaz web calculando el importe del período
-    // (no es información propia del vehículo: combina su precioDiario con
-    // fechas que pide el cliente).
-    const { vehiculos } = await firstValueFrom(
-      this.vehiculoGrpcService.consultarDisponibilidad({
-        fechaInicio: filtro.fechaInicio.toISOString(),
-        fechaFinalizacion: filtro.fechaFin.toISOString(),
-        tipoVehiculo: filtro.tipoVehiculo,
-        marca: filtro.marca,
-        modelo: filtro.modelo,
-        precioMinimo: filtro.precioMinimo,
-        precioMaximo: filtro.precioMaximo,
-      }),
-    );
-
-    return vehiculos.map((vehiculo) => ({
-      id: vehiculo.id,
-      patente: vehiculo.patente,
-      marca: vehiculo.marca,
-      modelo: vehiculo.modelo,
-      anio: vehiculo.anio,
-      color: vehiculo.color ?? null,
-      tipoVehiculo: vehiculo.tipoVehiculo as VehiculoDisponible['tipoVehiculo'],
-      precioDiario: vehiculo.precioDiario,
-      importeTotal: calcularImporte(
-        vehiculo.precioDiario,
-        filtro.fechaInicio,
-        filtro.fechaFin,
+    // Vehicle Service filtra sus datos propios y Rental Service informa qué
+    // ids tienen reservas superpuestas. El Gateway compone ambos resultados
+    // sin que ningún servicio lea la base de otro dominio.
+    const [{ vehiculos }, { vehiculoIds }] = await Promise.all([
+      firstValueFrom(
+        this.vehiculoGrpcService.filtrarVehiculos({
+          tipoVehiculo: filtro.tipoVehiculo,
+          marca: filtro.marca,
+          modelo: filtro.modelo,
+          precioMinimo: filtro.precioMinimo,
+          precioMaximo: filtro.precioMaximo,
+        }),
       ),
-    }));
+      firstValueFrom(
+        this.reservaGrpcService.consultarVehiculosOcupados({
+          fechaInicio: filtro.fechaInicio.toISOString(),
+          fechaFinalizacion: filtro.fechaFin.toISOString(),
+        }),
+      ),
+    ]);
+    const ocupados = new Set(vehiculoIds ?? []);
+
+    return vehiculos
+      .filter((vehiculo) => !ocupados.has(vehiculo.id))
+      .map((vehiculo) => ({
+        id: vehiculo.id,
+        patente: vehiculo.patente,
+        marca: vehiculo.marca,
+        modelo: vehiculo.modelo,
+        anio: vehiculo.anio,
+        color: vehiculo.color ?? null,
+        tipoVehiculo:
+          vehiculo.tipoVehiculo as VehiculoDisponible['tipoVehiculo'],
+        precioDiario: vehiculo.precioDiario,
+        importeTotal: calcularImporte(
+          vehiculo.precioDiario,
+          filtro.fechaInicio,
+          filtro.fechaFin,
+        ),
+      }));
   }
 }

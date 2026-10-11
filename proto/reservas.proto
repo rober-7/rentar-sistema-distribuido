@@ -9,6 +9,8 @@ service ReservaService {
   rpc ConsultarReservas(ConsultarReservasRequest) returns (ConsultarReservasResponse);
   rpc CancelarReserva(CancelarReservaRequest) returns (Reserva);
   rpc ConsultarHistorial(ConsultarHistorialRequest) returns (ConsultarHistorialResponse);
+  rpc ConsultarVehiculosOcupados(ConsultarVehiculosOcupadosRequest) returns (ConsultarVehiculosOcupadosResponse);
+  rpc ConsultarEstadosVehiculos(ConsultarEstadosVehiculosRequest) returns (ConsultarEstadosVehiculosResponse);
 }
 
 enum EstadoReserva {
@@ -56,4 +58,26 @@ message ConsultarHistorialRequest {
 
 message ConsultarHistorialResponse {
   repeated Reserva reservas = 1;
+}
+
+message ConsultarVehiculosOcupadosRequest {
+  string fecha_inicio = 1;
+  string fecha_finalizacion = 2;
+}
+
+message ConsultarVehiculosOcupadosResponse {
+  repeated int32 vehiculo_ids = 1;
+}
+
+message ConsultarEstadosVehiculosRequest {
+  repeated int32 vehiculo_ids = 1;
+}
+
+message EstadoVehiculoReserva {
+  int32 vehiculo_id = 1;
+  string estado = 2;
+}
+
+message ConsultarEstadosVehiculosResponse {
+  repeated EstadoVehiculoReserva estados = 1;
 }

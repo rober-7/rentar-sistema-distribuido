@@ -20,7 +20,8 @@ import { TipoVehiculo } from '../../vehiculos/enums/tipo-vehiculo.enum';
 export class FiltroDisponibilidadInput {
   @Field(() => TipoVehiculo, {
     nullable: true,
-    description: 'Filtra por tipo de vehículo exacto. Si se omite, no filtra por tipo.',
+    description:
+      'Filtra por tipo de vehículo exacto. Si se omite, no filtra por tipo.',
   })
   @IsOptional()
   @IsEnum(TipoVehiculo)

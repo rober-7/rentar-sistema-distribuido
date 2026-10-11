@@ -8,7 +8,9 @@ package vehiculos;
 service VehiculoService {
   rpc ListarVehiculos(ListarVehiculosRequest) returns (ListarVehiculosResponse);
   rpc ObtenerVehiculo(ObtenerVehiculoRequest) returns (Vehiculo);
-  rpc ConsultarDisponibilidad(ConsultarDisponibilidadRequest) returns (ListarVehiculosResponse);
+  // Filtra exclusivamente datos propios del dominio Vehículos. La
+  // disponibilidad temporal se resuelve con Rental Service.
+  rpc FiltrarVehiculos(FiltrarVehiculosRequest) returns (ListarVehiculosResponse);
   rpc ActualizarEstado(ActualizarEstadoRequest) returns (Vehiculo);
   rpc CrearVehiculo(CrearVehiculoRequest) returns (Vehiculo);
   rpc ActualizarVehiculo(ActualizarVehiculoRequest) returns (Vehiculo);
@@ -55,14 +57,12 @@ message ObtenerVehiculoRequest {
   int32 id = 1;
 }
 
-message ConsultarDisponibilidadRequest {
-  string fecha_inicio = 1;
-  string fecha_finalizacion = 2;
-  optional TipoVehiculo tipo_vehiculo = 3;
-  optional string marca = 4;
-  optional string modelo = 5;
-  optional double precio_minimo = 6;
-  optional double precio_maximo = 7;
+message FiltrarVehiculosRequest {
+  optional TipoVehiculo tipo_vehiculo = 1;
+  optional string marca = 2;
+  optional string modelo = 3;
+  optional double precio_minimo = 4;
+  optional double precio_maximo = 5;
 }
 
 message ActualizarEstadoRequest {

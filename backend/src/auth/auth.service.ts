@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { CLIENTE_PACKAGE } from '../clientes/clientes.constants';
 import { ClienteServiceGrpcClient } from '../clientes/grpc/cliente-grpc.interface';
 import { AuthenticatedUser } from './interfaces/authenticated-user.interface';
+import { isGrpcServiceError } from '../common/grpc/grpc-error';
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -42,7 +43,11 @@ export class AuthService implements OnModuleInit {
         }),
       );
     } catch (error) {
-      if (error?.code !== GrpcStatus.ALREADY_EXISTS) throw error;
+      if (
+        !isGrpcServiceError(error) ||
+        error.code !== GrpcStatus.ALREADY_EXISTS
+      )
+        throw error;
     }
   }
 
@@ -75,7 +80,8 @@ export class AuthService implements OnModuleInit {
       );
       return activo;
     } catch (error) {
-      if (error?.code === GrpcStatus.NOT_FOUND) return false;
+      if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND)
+        return false;
       throw error;
     }
   }

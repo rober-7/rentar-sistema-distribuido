@@ -40,7 +40,7 @@ export interface CrearClienteGrpcRequest {
   email: string;
   telefono?: string;
   // NestJS con keepCase: false transforma fecha_nacimiento (del .proto) a camelCase
-  fechaNacimiento: string; 
+  fechaNacimiento: string;
   password: string;
 }
 
@@ -70,14 +70,24 @@ export interface ValidarLoginGrpcResponse {
 }
 
 export interface ClienteServiceGrpcClient {
-  listarClientes(data: ListarClientesGrpcRequest): Observable<{ clientes: ClienteGrpc[] }>;
+  listarClientes(
+    data: ListarClientesGrpcRequest,
+  ): Observable<{ clientes: ClienteGrpc[] }>;
   obtenerCliente(data: ObtenerClienteGrpcRequest): Observable<ClienteGrpc>;
-  verificarExistencia(data: VerificarExistenciaGrpcRequest): Observable<VerificarExistenciaGrpcResponse>;
-  verificarActivo(data: VerificarActivoGrpcRequest): Observable<VerificarActivoGrpcResponse>;
+  verificarExistencia(
+    data: VerificarExistenciaGrpcRequest,
+  ): Observable<VerificarExistenciaGrpcResponse>;
+  verificarActivo(
+    data: VerificarActivoGrpcRequest,
+  ): Observable<VerificarActivoGrpcResponse>;
   crearCliente(
     data: CrearClienteGrpcRequest & { rol?: string },
   ): Observable<ClienteGrpc>;
-  actualizarCliente(data: ActualizarClienteGrpcRequest): Observable<ClienteGrpc>;
+  actualizarCliente(
+    data: ActualizarClienteGrpcRequest,
+  ): Observable<ClienteGrpc>;
   eliminarCliente(data: EliminarClienteGrpcRequest): Observable<ClienteGrpc>;
-  validarLogin(data: ValidarLoginGrpcRequest): Observable<ValidarLoginGrpcResponse>;
+  validarLogin(
+    data: ValidarLoginGrpcRequest,
+  ): Observable<ValidarLoginGrpcResponse>;
 }

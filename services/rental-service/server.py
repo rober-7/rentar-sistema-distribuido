@@ -1,9 +1,8 @@
 """Rental Service: microservicio gRPC para Reservas e historial de alquiler. (Hito 2, Punto 4)
 
-Implementa las cuatro operaciones del contrato (CrearReserva, ConsultarReservas, CancelarReserva, ConsultarHistorial) 
-leyendo directamente la base de datos Postgres compartida (tabla "reservas").
-
-
+Gestiona exclusivamente su propia base PostgreSQL (tabla "reservas"). Para
+validar clientes y vehículos consume Customer Service y Vehicle Service por
+gRPC; nunca lee tablas de otros dominios.
 """
 
 import math
@@ -16,6 +15,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import grpc
 from grpc_tools import protoc
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 
 PROTO_DIR = os.path.join(os.path.dirname(__file__), "proto")
 GENERATED_DIR = os.path.join(os.path.dirname(__file__), "generated")
@@ -31,6 +31,8 @@ def compilar_proto() -> None:
             f"--python_out={GENERATED_DIR}",
             f"--grpc_python_out={GENERATED_DIR}",
             os.path.join(PROTO_DIR, "reservas.proto"),
+            os.path.join(PROTO_DIR, "clientes.proto"),
+            os.path.join(PROTO_DIR, "vehiculos.proto"),
         ]
     )
     if codigo != 0:
@@ -42,6 +44,10 @@ sys.path.insert(0, GENERATED_DIR)
 
 import reservas_pb2 as pb  # noqa: E402
 import reservas_pb2_grpc as pb_grpc  # noqa: E402
+import clientes_pb2  # noqa: E402
+import clientes_pb2_grpc  # noqa: E402
+import vehiculos_pb2  # noqa: E402
+import vehiculos_pb2_grpc  # noqa: E402
 
 
 def engine_desde_env():
@@ -90,8 +96,19 @@ _SELECT_RESERVA = """
 
 
 class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
-    def __init__(self, engine):
+    def __init__(self, engine, customer_channel, vehicle_channel):
         self.engine = engine
+        self.customer_client = clientes_pb2_grpc.ClienteServiceStub(
+            customer_channel
+        )
+        self.vehicle_client = vehiculos_pb2_grpc.VehiculoServiceStub(
+            vehicle_channel
+        )
+
+    @staticmethod
+    def _reenviar_error_grpc(error, context, servicio):
+        detalle = error.details() or f"{servicio} no disponible"
+        context.abort(error.code(), detalle)
 
     def CrearReserva(self, request, context):
         print("[gRPC] CrearReserva invocado por el Gateway", flush=True)
@@ -117,107 +134,72 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 "La fecha de finalización debe ser posterior a la fecha de inicio",
             )
 
-        with self.engine.begin() as conn:
-            cliente = conn.execute(
-                text(
-                    """
-                    SELECT id, activo
-                    FROM usuarios
-                    WHERE id = :id AND rol = 'CLIENTE'
-                    FOR SHARE
-                    """
-                ),
-                {"id": request.cliente_id},
-            ).mappings().first()
-            if cliente is None:
-                context.abort(
-                    grpc.StatusCode.NOT_FOUND,
-                    f"No existe un cliente con id {request.cliente_id}",
-                )
-            if not cliente["activo"]:
-                context.abort(
-                    grpc.StatusCode.NOT_FOUND,
-                    f"No existe un cliente activo con id {request.cliente_id}",
-                )
+        # Las llamadas remotas se hacen antes de abrir la transacción local:
+        # nunca se mantiene una transacción SQL esperando una respuesta gRPC.
+        try:
+            cliente = self.customer_client.VerificarActivo(
+                clientes_pb2.VerificarActivoRequest(id=request.cliente_id),
+                timeout=5,
+            )
+            vehiculo = self.vehicle_client.ObtenerVehiculo(
+                vehiculos_pb2.ObtenerVehiculoRequest(id=request.vehiculo_id),
+                timeout=5,
+            )
+        except grpc.RpcError as error:
+            self._reenviar_error_grpc(error, context, "servicio de dominio")
 
-            vehiculo = conn.execute(
-                text(
-                    """
-                    SELECT id, "precioDiario" AS precio_diario, activo
-                    FROM vehiculos
-                    WHERE id = :id
-                    FOR UPDATE
-                    """
-                ),
-                {"id": request.vehiculo_id},
-            ).mappings().first()
-            if vehiculo is None:
-                context.abort(
-                    grpc.StatusCode.NOT_FOUND,
-                    f"No existe un vehículo con id {request.vehiculo_id}",
-                )
-            if not vehiculo["activo"]:
-                context.abort(
-                    grpc.StatusCode.FAILED_PRECONDITION,
-                    f"El vehículo con id {request.vehiculo_id} está inactivo",
-                )
+        if not cliente.activo:
+            context.abort(
+                grpc.StatusCode.NOT_FOUND,
+                f"No existe un cliente activo con id {request.cliente_id}",
+            )
+        if not vehiculo.activo:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"El vehículo con id {request.vehiculo_id} está inactivo",
+            )
 
-            solapada = conn.execute(
-                text(
-                    """
-                    SELECT 1
-                    FROM reservas
-                    WHERE vehiculo_id = :vehiculo_id
-                      AND activo = true
-                      AND estado = 'CONFIRMADA'
-                      AND "fechaInicio" < :fin
-                      AND "fechaFinalizacion" > :inicio
-                    LIMIT 1
-                    """
-                ),
-                {
-                    "vehiculo_id": request.vehiculo_id,
-                    "inicio": inicio,
-                    "fin": fin,
-                },
-            ).first()
-            if solapada is not None:
+        dias = math.ceil((fin - inicio).total_seconds() / 86_400)
+        precio_centavos = int(
+            (Decimal(str(vehiculo.precio_diario)) * 100).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        importe_total = Decimal(precio_centavos * dias) / 100
+
+        try:
+            with self.engine.begin() as conn:
+                reserva = conn.execute(
+                    text(
+                        """
+                        INSERT INTO reservas
+                            (vehiculo_id, cliente_id, "fechaInicio",
+                             "fechaFinalizacion", "importeTotal", estado, activo,
+                             "creadoEn", "actualizadoEn")
+                        VALUES
+                            (:vehiculo_id, :cliente_id, :inicio, :fin,
+                             :importe_total, 'CONFIRMADA', true, now(), now())
+                        RETURNING id, vehiculo_id, cliente_id,
+                                  "fechaInicio" AS fecha_inicio,
+                                  "fechaFinalizacion" AS fecha_finalizacion,
+                                  "importeTotal" AS importe_total, estado, activo
+                        """
+                    ),
+                    {
+                        "vehiculo_id": request.vehiculo_id,
+                        "cliente_id": request.cliente_id,
+                        "inicio": inicio,
+                        "fin": fin,
+                        "importe_total": importe_total,
+                    },
+                ).mappings().one()
+        except IntegrityError as error:
+            if getattr(error.orig, "pgcode", None) == "23P01":
                 context.abort(
                     grpc.StatusCode.ALREADY_EXISTS,
                     "El vehículo ya está reservado para esas fechas",
                 )
-
-            dias = math.ceil((fin - inicio).total_seconds() / 86_400)
-            precio_centavos = int(
-                (Decimal(str(vehiculo["precio_diario"])) * 100).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-            )
-            importe_total = Decimal(precio_centavos * dias) / 100
-            reserva = conn.execute(
-                text(
-                    """
-                    INSERT INTO reservas
-                        (vehiculo_id, cliente_id, "fechaInicio",
-                         "fechaFinalizacion", "importeTotal", estado, activo,
-                         "creadoEn", "actualizadoEn")
-                    VALUES
-                        (:vehiculo_id, :cliente_id, :inicio, :fin,
-                         :importe_total, 'CONFIRMADA', true, now(), now())
-                    RETURNING id, vehiculo_id, cliente_id,
-                              "fechaInicio" AS fecha_inicio,
-                              "fechaFinalizacion" AS fecha_finalizacion,
-                              "importeTotal" AS importe_total, estado, activo
-                    """
-                ),
-                {
-                    "vehiculo_id": request.vehiculo_id,
-                    "cliente_id": request.cliente_id,
-                    "inicio": inicio,
-                    "fin": fin,
-                    "importe_total": importe_total,
-                },
-            ).mappings().one()
+            raise
         return _fila_a_pb(reserva)
 
     def ConsultarReservas(self, request, context):
@@ -325,12 +307,93 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             respuesta.reservas.append(_fila_a_pb(item))
         return respuesta
 
+    def ConsultarVehiculosOcupados(self, request, context):
+        print("[gRPC] ConsultarVehiculosOcupados invocado", flush=True)
+        inicio = _parsear_fecha(request.fecha_inicio, "fecha_inicio", context)
+        fin = _parsear_fecha(
+            request.fecha_finalizacion, "fecha_finalizacion", context
+        )
+        if fin <= inicio:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "La fecha de finalización debe ser posterior a la fecha de inicio",
+            )
+
+        with self.engine.connect() as conn:
+            filas = conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT vehiculo_id
+                    FROM reservas
+                    WHERE activo = true
+                      AND estado = 'CONFIRMADA'
+                      AND "fechaInicio" < :fin
+                      AND "fechaFinalizacion" > :inicio
+                    """
+                ),
+                {"inicio": inicio, "fin": fin},
+            ).all()
+        return pb.ConsultarVehiculosOcupadosResponse(
+            vehiculo_ids=[fila[0] for fila in filas]
+        )
+
+    def ConsultarEstadosVehiculos(self, request, context):
+        print("[gRPC] ConsultarEstadosVehiculos invocado", flush=True)
+        ids = list(request.vehiculo_ids)
+        respuesta = pb.ConsultarEstadosVehiculosResponse()
+        if not ids:
+            return respuesta
+
+        with self.engine.connect() as conn:
+            filas = conn.execute(
+                text(
+                    """
+                    SELECT vehiculo_id, "fechaInicio"
+                    FROM reservas
+                    WHERE vehiculo_id = ANY(:ids)
+                      AND activo = true
+                      AND estado = 'CONFIRMADA'
+                      AND "fechaFinalizacion" > now()
+                    """
+                ),
+                {"ids": ids},
+            ).mappings().all()
+
+        ahora = datetime.now(timezone.utc)
+        inicios_por_vehiculo = {}
+        for fila in filas:
+            inicios_por_vehiculo.setdefault(fila["vehiculo_id"], []).append(
+                fila["fechaInicio"]
+            )
+
+        for vehiculo_id in ids:
+            inicios = inicios_por_vehiculo.get(vehiculo_id, [])
+            if any(inicio <= ahora for inicio in inicios):
+                estado = "EN_ALQUILER"
+            elif inicios:
+                estado = "RESERVADO"
+            else:
+                estado = "DISPONIBLE"
+            respuesta.estados.append(
+                pb.EstadoVehiculoReserva(
+                    vehiculo_id=vehiculo_id,
+                    estado=estado,
+                )
+            )
+        return respuesta
+
 
 def main():
     engine = engine_desde_env()
+    customer_channel = grpc.insecure_channel(
+        os.environ.get("CUSTOMER_SERVICE_URL", "localhost:50052")
+    )
+    vehicle_channel = grpc.insecure_channel(
+        os.environ.get("VEHICLE_SERVICE_URL", "localhost:50051")
+    )
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     pb_grpc.add_ReservaServiceServicer_to_server(
-        ReservaServiceServicer(engine), server
+        ReservaServiceServicer(engine, customer_channel, vehicle_channel), server
     )
     puerto = os.environ.get("GRPC_PORT", "50053")
     server.add_insecure_port(f"[::]:{puerto}")

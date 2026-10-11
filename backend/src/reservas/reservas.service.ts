@@ -23,7 +23,10 @@ import { VehiculoServiceGrpcClient } from '../vehiculos/grpc/vehiculo-grpc.inter
 import { VehiculoGrpc } from '../vehiculos/grpc/vehiculo-grpc.interface';
 import { VEHICULO_PACKAGE } from '../vehiculos/vehiculos.constants';
 import { RENTAL_PACKAGE } from './rental.constants';
-import { ReservaGrpc, ReservaServiceGrpcClient } from './grpc/reserva-grpc.interface';
+import {
+  ReservaGrpc,
+  ReservaServiceGrpcClient,
+} from './grpc/reserva-grpc.interface';
 
 @Injectable()
 export class ReservasService implements OnModuleInit {
@@ -41,7 +44,9 @@ export class ReservasService implements OnModuleInit {
     this.reservasGrpc =
       this.rentalClient.getService<ReservaServiceGrpcClient>('ReservaService');
     this.clientesGrpc =
-      this.customerClient.getService<ClienteServiceGrpcClient>('ClienteService');
+      this.customerClient.getService<ClienteServiceGrpcClient>(
+        'ClienteService',
+      );
     this.vehiculosGrpc =
       this.vehicleClient.getService<VehiculoServiceGrpcClient>(
         'VehiculoService',
@@ -127,37 +132,8 @@ export class ReservasService implements OnModuleInit {
 
   async create(dto: CreateReservaDto, clienteId: number) {
     try {
-      const [cliente, vehiculo] = await Promise.all([
-        firstValueFrom(this.clientesGrpc.verificarActivo({ id: clienteId })),
-        firstValueFrom(
-          this.vehiculosGrpc.obtenerVehiculo({ id: dto.vehiculo }),
-        ),
-      ]);
-      if (!cliente.activo) {
-        throw new NotFoundException(
-          `No existe un cliente activo con id ${clienteId}`,
-        );
-      }
-      if (!vehiculo.activo) {
-        throw new ConflictException('El vehículo está inactivo');
-      }
-
-      const disponibilidad = await firstValueFrom(
-        this.vehiculosGrpc.consultarDisponibilidad({
-          fechaInicio: dto.fechaInicio,
-          fechaFinalizacion: dto.fechaFinalizacion,
-        }),
-      );
-      if (
-        !(disponibilidad.vehiculos ?? []).some(
-          (disponible) => disponible.id === dto.vehiculo,
-        )
-      ) {
-        throw new ConflictException(
-          'El vehículo ya está reservado para esas fechas',
-        );
-      }
-
+      // Rental Service valida cliente y vehículo por gRPC y garantiza en su
+      // propia base, mediante una restricción EXCLUDE, que no haya solapamientos.
       const reserva = await firstValueFrom(
         this.reservasGrpc.crearReserva({
           vehiculoId: dto.vehiculo,
@@ -221,7 +197,8 @@ export class ReservasService implements OnModuleInit {
         ? String(error.details)
         : 'Error al procesar la reserva';
 
-    if (code === GrpcStatus.INVALID_ARGUMENT) throw new BadRequestException(details);
+    if (code === GrpcStatus.INVALID_ARGUMENT)
+      throw new BadRequestException(details);
     if (code === GrpcStatus.NOT_FOUND) throw new NotFoundException(details);
     if (code === GrpcStatus.PERMISSION_DENIED)
       throw new ForbiddenException(details);
