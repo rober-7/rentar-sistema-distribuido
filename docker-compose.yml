@@ -1,18 +1,57 @@
 services:
-  db:
+  customer_db:
     image: postgres:16
-    container_name: rentar_db
+    container_name: rentar_customer_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: rentar
-      POSTGRES_PASSWORD: rentar
-      POSTGRES_DB: rentar_db
+      POSTGRES_USER: customer
+      POSTGRES_PASSWORD: customer
+      POSTGRES_DB: customer_db
     ports:
       - "5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - customer_db_data:/var/lib/postgresql/data
+      - ./services/customer-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rentar -d rentar_db"]
+      test: ["CMD-SHELL", "pg_isready -U customer -d customer_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  vehicle_db:
+    image: postgres:16
+    container_name: rentar_vehicle_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vehicle
+      POSTGRES_PASSWORD: vehicle
+      POSTGRES_DB: vehicle_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - vehicle_db_data:/var/lib/postgresql/data
+      - ./services/vehicle-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vehicle -d vehicle_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rental_db:
+    image: postgres:16
+    container_name: rentar_rental_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rental
+      POSTGRES_PASSWORD: rental
+      POSTGRES_DB: rental_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - rental_db_data:/var/lib/postgresql/data
+      - ./services/rental-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rental -d rental_db"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,7 +63,9 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - db
+      - customer_db
+      - vehicle_db
+      - rental_db
 
   vehicle_service:
     build:
@@ -33,17 +74,17 @@ services:
     container_name: rentar_vehicle_service
     restart: unless-stopped
     environment:
-      DB_HOST: db
+      DB_HOST: vehicle_db
       DB_PORT: 5432
-      DB_USER: rentar
-      DB_PASSWORD: rentar
-      DB_NAME: rentar_db
+      DB_USER: vehicle
+      DB_PASSWORD: vehicle
+      DB_NAME: vehicle_db
       GRPC_PORT: 50051
     volumes:
       - ./services/vehicle-service:/app
       - ./proto:/app/proto
     depends_on:
-      db:
+      vehicle_db:
         condition: service_healthy
 
   customer_service:
@@ -53,17 +94,17 @@ services:
     container_name: rentar_customer_service
     restart: unless-stopped
     environment:
-      DB_HOST: db
+      DB_HOST: customer_db
       DB_PORT: 5432
-      DB_USER: rentar
-      DB_PASSWORD: rentar
-      DB_NAME: rentar_db
+      DB_USER: customer
+      DB_PASSWORD: customer
+      DB_NAME: customer_db
       GRPC_PORT: 50052
     volumes:
       - ./services/customer-service:/app
       - ./proto:/app/proto
     depends_on:
-      db:
+      customer_db:
         condition: service_healthy
 
   rental_service:
@@ -73,18 +114,24 @@ services:
     container_name: rentar_rental_service
     restart: unless-stopped
     environment:
-      DB_HOST: db
+      DB_HOST: rental_db
       DB_PORT: 5432
-      DB_USER: rentar
-      DB_PASSWORD: rentar
-      DB_NAME: rentar_db
+      DB_USER: rental
+      DB_PASSWORD: rental
+      DB_NAME: rental_db
       GRPC_PORT: 50053
+      CUSTOMER_SERVICE_URL: customer_service:50052
+      VEHICLE_SERVICE_URL: vehicle_service:50051
     volumes:
       - ./services/rental-service:/app
       - ./proto:/app/proto
     depends_on:
-      db:
+      rental_db:
         condition: service_healthy
+      customer_service:
+        condition: service_started
+      vehicle_service:
+        condition: service_started
 
   backend:
     build:
@@ -105,8 +152,6 @@ services:
       CUSTOMER_SERVICE_URL: customer_service:50052
       RENTAL_SERVICE_URL: rental_service:50053
     depends_on:
-      db:
-        condition: service_healthy
       vehicle_service:
         condition: service_started
       customer_service:
@@ -129,4 +174,6 @@ services:
       - backend
 
 volumes:
-  db_data:
+  customer_db_data:
+  vehicle_db_data:
+  rental_db_data:

@@ -24,7 +24,7 @@ import { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
-import { Usuario } from './entities/usuario.entity';
+import { ClienteResponseDto } from './dto/cliente-response.dto';
 import { Authenticated } from '../auth/auth.guards';
 import { Roles } from '../auth/roles.decorator';
 import { RolUsuario } from './enums/rol-usuario.enum';
@@ -57,8 +57,14 @@ export class ClientesController implements OnModuleInit {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Da de alta un cliente (vía Customer Service, gRPC)' })
-  @ApiResponse({ status: 201, description: 'Cliente creado', type: Usuario })
+  @ApiOperation({
+    summary: 'Da de alta un cliente (vía Customer Service, gRPC)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Cliente creado',
+    type: ClienteResponseDto,
+  })
   @ApiResponse({
     status: 400,
     description:
@@ -70,7 +76,9 @@ export class ClientesController implements OnModuleInit {
     status: 409,
     description: 'Ya existe un cliente con ese documento o email',
   })
-  async create(@Body() createClienteDto: CreateClienteDto): Promise<ClienteGrpc> {
+  async create(
+    @Body() createClienteDto: CreateClienteDto,
+  ): Promise<ClienteGrpc> {
     try {
       return await firstValueFrom(
         this.clienteGrpcService.crearCliente(createClienteDto),
@@ -86,11 +94,13 @@ export class ClientesController implements OnModuleInit {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lista todos los clientes (vía Customer Service, gRPC)' })
+  @ApiOperation({
+    summary: 'Lista todos los clientes (vía Customer Service, gRPC)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Listado de clientes',
-    type: [Usuario],
+    type: [ClienteResponseDto],
   })
   async findAll(): Promise<ClienteGrpc[]> {
     const response = await firstValueFrom(
@@ -101,12 +111,14 @@ export class ClientesController implements OnModuleInit {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Consulta un cliente por id (vía Customer Service, gRPC)' })
+  @ApiOperation({
+    summary: 'Consulta un cliente por id (vía Customer Service, gRPC)',
+  })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({
     status: 200,
     description: 'Cliente encontrado',
-    type: Usuario,
+    type: ClienteResponseDto,
   })
   @ApiResponse({
     status: 400,
@@ -128,13 +140,14 @@ export class ClientesController implements OnModuleInit {
 
   @Patch(':id')
   @ApiOperation({
-    summary: 'Modifica un cliente. El documento no se puede modificar (vía Customer Service, gRPC)',
+    summary:
+      'Modifica un cliente. El documento no se puede modificar (vía Customer Service, gRPC)',
   })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({
     status: 200,
     description: 'Cliente actualizado',
-    type: Usuario,
+    type: ClienteResponseDto,
   })
   @ApiResponse({
     status: 400,
@@ -160,12 +173,15 @@ export class ClientesController implements OnModuleInit {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Baja lógica de un cliente (activo = false; vía Customer Service, gRPC)' })
+  @ApiOperation({
+    summary:
+      'Baja lógica de un cliente (activo = false; vía Customer Service, gRPC)',
+  })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({
     status: 200,
     description: 'Cliente dado de baja',
-    type: Usuario,
+    type: ClienteResponseDto,
   })
   @ApiResponse({
     status: 400,

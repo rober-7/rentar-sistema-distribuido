@@ -15,7 +15,10 @@ import {
 } from '@nestjs/swagger';
 import { ReservasService } from './reservas.service';
 import { CreateReservaDto } from './dto/create-reserva.dto';
-import { Reserva } from './entities/reserva.entity';
+import {
+  ReservaCreadaResponseDto,
+  ReservaResponseDto,
+} from './dto/reserva-response.dto';
 import { Authenticated } from '../auth/auth.guards';
 import { Roles } from '../auth/roles.decorator';
 import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
@@ -35,7 +38,7 @@ export class ReservasController {
   constructor(private readonly reservas: ReservasService) {}
   @Post()
   @ApiOperation({ summary: 'Crea una reserva para el cliente autenticado' })
-  @ApiResponse({ status: 201, type: Reserva })
+  @ApiResponse({ status: 201, type: ReservaCreadaResponseDto })
   @ApiResponse({
     status: 400,
     description:
@@ -65,7 +68,11 @@ export class ReservasController {
   @Patch(':id/cancelar')
   @ApiOperation({ summary: 'Cancela una reserva propia antes de su inicio' })
   @ApiParam({ name: 'id', type: Number })
-  @ApiResponse({ status: 200, description: 'Reserva cancelada', type: Reserva })
+  @ApiResponse({
+    status: 200,
+    description: 'Reserva cancelada',
+    type: ReservaResponseDto,
+  })
   @ApiResponse({
     status: 400,
     description: 'El id de la URL no es un número entero',

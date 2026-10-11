@@ -15,9 +15,7 @@ export interface VehiculoGrpc {
   actualizadoEn: string;
 }
 
-export interface ConsultarDisponibilidadGrpcRequest {
-  fechaInicio: string;
-  fechaFinalizacion: string;
+export interface FiltrarVehiculosGrpcRequest {
   tipoVehiculo?: string;
   marca?: string;
   modelo?: string;
@@ -52,8 +50,8 @@ export interface VehiculoServiceGrpcClient {
     vehiculos: VehiculoGrpc[];
   }>;
   obtenerVehiculo(data: { id: number }): Observable<VehiculoGrpc>;
-  consultarDisponibilidad(
-    data: ConsultarDisponibilidadGrpcRequest,
+  filtrarVehiculos(
+    data: FiltrarVehiculosGrpcRequest,
   ): Observable<{ vehiculos: VehiculoGrpc[] }>;
   crearVehiculo(data: CrearVehiculoGrpcRequest): Observable<VehiculoGrpc>;
   actualizarVehiculo(
