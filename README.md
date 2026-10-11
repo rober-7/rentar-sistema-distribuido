@@ -4,7 +4,7 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
 
 ## Stack
 
-- **API Gateway:** NestJS + TypeScript + TypeORM + PostgreSQL + GraphQL (Apollo) — `backend/`
+- **API Gateway:** NestJS + TypeScript + GraphQL (Apollo) — `backend/`
 - **Vehicle Service:** Python + grpcio + SQLAlchemy — `services/vehicle-service/`
 - **Customer Service:** Python + grpcio + SQLAlchemy — `services/customer-service/`
 - **Rental Service:** Python + grpcio + SQLAlchemy — `services/rental-service/`
@@ -41,7 +41,7 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
    docker compose up --build
    ```
 
-   Esto levanta PostgreSQL, Adminer, los tres servicios gRPC (Python), el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
+   Esto levanta tres bases PostgreSQL independientes, Adminer, los tres servicios gRPC (Python), el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
 
 4. Cuando termine de levantar, vas a tener disponible:
 
@@ -50,17 +50,17 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
    | Frontend  | http://localhost:5173        |                                  |
    | Backend   | http://localhost:3000        | API REST + GraphQL              |
    | Adminer   | http://localhost:8080        | Ver tabla de abajo para entrar  |
-   | Postgres  | localhost:5432               | Para conectarte con un cliente externo (DBeaver, etc.) |
+   | Customer DB | localhost:5432             | PostgreSQL exclusivo de Customer Service |
+   | Vehicle DB  | localhost:5433             | PostgreSQL exclusivo de Vehicle Service |
+   | Rental DB   | localhost:5434             | PostgreSQL exclusivo de Rental Service |
 
-   Para entrar a **Adminer** y ver la base de datos, usá estas credenciales:
+   Para entrar a **Adminer**, elegí la base que quieras inspeccionar:
 
-   | Campo              | Valor         |
-   |--------------------|---------------|
-   | Sistema            | PostgreSQL    |
-   | Servidor           | `db`          |
-   | Usuario            | `rentar`      |
-   | Contraseña         | `rentar`      |
-   | Base de datos      | `rentar_db`   |
+   | Dominio | Servidor | Usuario | Contraseña | Base |
+   |---|---|---|---|---|
+   | Clientes | `customer_db` | `customer` | `customer` | `customer_db` |
+   | Vehículos | `vehicle_db` | `vehicle` | `vehicle` | `vehicle_db` |
+   | Reservas | `rental_db` | `rental` | `rental` | `rental_db` |
 
 
    ### Acceso inicial
@@ -127,6 +127,6 @@ Estado por punto de la consigna:
 | 3. Customer Service (gRPC) | ✅ Implementado | `services/customer-service/` implementa el ABM, las consultas y las verificaciones de existencia y estado activo en Python. |
 | 4. Rental Service (gRPC) | ✅ Implementado | `services/rental-service/` implementa creación, consulta, cancelación de reservas e historial en Python. |
 | Contratos gRPC | ✅ Implementados | Los contratos de los tres dominios están en `proto/vehiculos.proto`, `proto/clientes.proto` y `proto/reservas.proto`. |
-| Coordinación entre servicios | ✅ Implementada | Para crear una reserva, el Gateway verifica por gRPC que el cliente esté activo y consulta por gRPC el vehículo y su disponibilidad; después solicita la creación al Rental Service. |
+| Coordinación entre servicios | ✅ Implementada | Rental Service valida cliente y vehículo mediante gRPC antes de crear una reserva. El Gateway combina los filtros de Vehicle Service con la ocupación informada por Rental Service. |
 
-**Alcance y arquitectura actual:** el Gateway mantiene acceso a PostgreSQL para autenticación y creación inicial del administrador. Además, los servicios Python usan la base de datos PostgreSQL compartida por Compose; por ejemplo, Rental Service consulta datos de clientes y vehículos al validar una reserva. Por lo tanto, las operaciones de dominio del Gateway pasan por gRPC, pero los servicios no tienen bases de datos aisladas entre sí.
+**Arquitectura actual:** el Gateway no accede a ninguna base de datos. Cada servicio Python posee una base PostgreSQL y credenciales independientes; las referencias entre dominios se guardan como identificadores y se validan mediante gRPC. Rental DB impide atómicamente reservas superpuestas con una restricción `EXCLUDE` de PostgreSQL.
