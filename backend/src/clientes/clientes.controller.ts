@@ -33,6 +33,7 @@ import {
   ClienteGrpc,
   ClienteServiceGrpcClient,
 } from './grpc/cliente-grpc.interface';
+import { isGrpcServiceError } from '../common/grpc/grpc-error';
 
 @ApiTags('Clientes')
 @ApiBearerAuth()
@@ -84,7 +85,10 @@ export class ClientesController implements OnModuleInit {
         this.clienteGrpcService.crearCliente(createClienteDto),
       );
     } catch (error) {
-      if (error?.code === GrpcStatus.ALREADY_EXISTS) {
+      if (
+        isGrpcServiceError(error) &&
+        error.code === GrpcStatus.ALREADY_EXISTS
+      ) {
         throw new ConflictException(
           `Ya existe un cliente con el documento ${createClienteDto.documento} o ese email`,
         );
@@ -131,7 +135,7 @@ export class ClientesController implements OnModuleInit {
         this.clienteGrpcService.obtenerCliente({ id }),
       );
     } catch (error) {
-      if (error?.code === GrpcStatus.NOT_FOUND) {
+      if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un cliente con id ${id}`);
       }
       throw error;
@@ -165,7 +169,7 @@ export class ClientesController implements OnModuleInit {
         this.clienteGrpcService.actualizarCliente({ id, ...updateClienteDto }),
       );
     } catch (error) {
-      if (error?.code === GrpcStatus.NOT_FOUND) {
+      if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un cliente con id ${id}`);
       }
       throw error;
@@ -195,7 +199,7 @@ export class ClientesController implements OnModuleInit {
         this.clienteGrpcService.eliminarCliente({ id }),
       );
     } catch (error) {
-      if (error?.code === GrpcStatus.NOT_FOUND) {
+      if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un cliente con id ${id}`);
       }
       throw error;

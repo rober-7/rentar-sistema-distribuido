@@ -1,14 +1,15 @@
 import { token, cerrarSesion } from "../utils/auth";
 export async function apiFetch(url, options = {}) {
+  const { redirectOnUnauthorized = true, ...fetchOptions } = options;
   const response = await fetch(url, {
-    ...options,
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       ...(token() ? { Authorization: `Bearer ${token()}` } : {}),
-      ...(options.headers ?? {}),
+      ...(fetchOptions.headers ?? {}),
     },
   });
-  if (response.status === 401) {
+  if (response.status === 401 && redirectOnUnauthorized) {
     cerrarSesion();
     window.location.assign("/login");
   }

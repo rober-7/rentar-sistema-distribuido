@@ -12,6 +12,21 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
 - **Frontend:** React + Vite
 - **Infraestructura:** Docker Compose
 
+## Arquitectura
+
+```text
+Frontend
+   | REST / GraphQL
+   v
+API Gateway
+   |-- gRPC --> Customer Service --> Customer DB
+   |-- gRPC --> Vehicle Service  --> Vehicle DB
+   `-- gRPC --> Rental Service   --> Rental DB
+```
+
+El Gateway no accede a PostgreSQL. Cada servicio es dueño de su base y las
+referencias entre dominios se validan mediante gRPC.
+
 ## Cómo levantar el proyecto (para el equipo)
 
 ### Requisitos previos
@@ -49,6 +64,8 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
    |-----------|------------------------------|---------------------------------|
    | Frontend  | http://localhost:5173        |                                  |
    | Backend   | http://localhost:3000        | API REST + GraphQL              |
+   | Swagger   | http://localhost:3000/api/docs | Documentación y pruebas REST |
+   | GraphQL   | http://localhost:3000/graphql | Consultas GraphQL              |
    | Adminer   | http://localhost:8080        | Ver tabla de abajo para entrar  |
    | Customer DB | localhost:5432             | PostgreSQL exclusivo de Customer Service |
    | Vehicle DB  | localhost:5433             | PostgreSQL exclusivo de Vehicle Service |
@@ -65,12 +82,24 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
 
    ### Acceso inicial
 
-   En el primer inicio, el backend crea automáticamente un administrador si todavía no existe.
+   En el primer inicio, el API Gateway solicita por gRPC a Customer Service la
+   creación idempotente de un administrador.
 
    | Campo | Valor |
    |---|---|
    | Email | `admin@rentar.com` |
    | Contraseña | Valor configurado en `ADMIN_PASSWORD` dentro de `backend/.env` |
+
+   También se cargan datos demostrativos al crear los volúmenes por primera vez:
+
+   | Perfil | Email | Contraseña |
+   |---|---|---|
+   | Cliente demo | `mfernandez@gmail.com` | `ClienteRentar2026!` |
+
+   El cliente demo tiene tres vehículos precargados para consultar, una
+   reserva futura y un alquiler pasado visible en el historial. Los seeds se
+   ejecutan solamente al crear los volúmenes; `docker compose down` conserva
+   los datos y `docker compose down -v` permite regenerarlos desde cero.
 
 5. Para bajar todo: `Ctrl+C` en la terminal donde quedó corriendo, y después:
 
@@ -78,11 +107,17 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
    docker compose down
    ```
 
-   Si además querés borrar los datos de la base (empezar de cero), usá `docker compose down -v`.
+   Si además querés borrar todos los datos actuales y regenerar los esquemas y
+   seeds desde cero, usá `docker compose down -v`. Esta operación elimina los
+   tres volúmenes de datos y no se puede deshacer.
 
 ## Hot reload
 
 Tanto el backend como el frontend corren montados como volúmenes dentro de sus contenedores, así que los cambios que hagas en el código se reflejan automáticamente sin necesidad de reconstruir las imágenes.
+
+Los servicios Python también tienen su código montado, pero no usan hot reload:
+después de modificar un `server.py` hay que reiniciar el servicio. Si cambia un
+`requirements.txt`, hay que reconstruir su imagen.
 
 ## Estructura del repo
 
@@ -123,7 +158,7 @@ Estado por punto de la consigna:
 | Punto | Estado | Detalle |
 |---|---|---|
 | 1. API Gateway | ✅ Implementado | Es el punto de entrada REST/GraphQL. El ABM de clientes y vehículos, las reservas, las consultas y el historial se atienden a través del Gateway; sus operaciones de dominio llaman los servicios internos por gRPC. |
-| 2. Vehicle Service (gRPC) | ✅ Implementado | `services/vehicle-service/` implementa el ABM, la consulta de vehículos y disponibilidad, y la actualización de estado en Python. |
+| 2. Vehicle Service (gRPC) | ✅ Implementado | `services/vehicle-service/` implementa el ABM, las consultas y los filtros propios de vehículos. Rental Service informa la ocupación temporal y el Gateway compone la disponibilidad. |
 | 3. Customer Service (gRPC) | ✅ Implementado | `services/customer-service/` implementa el ABM, las consultas y las verificaciones de existencia y estado activo en Python. |
 | 4. Rental Service (gRPC) | ✅ Implementado | `services/rental-service/` implementa creación, consulta, cancelación de reservas e historial en Python. |
 | Contratos gRPC | ✅ Implementados | Los contratos de los tres dominios están en `proto/vehiculos.proto`, `proto/clientes.proto` y `proto/reservas.proto`. |

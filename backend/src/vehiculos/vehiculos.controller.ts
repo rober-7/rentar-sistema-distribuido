@@ -36,6 +36,10 @@ import {
   VehiculoGrpc,
   VehiculoServiceGrpcClient,
 } from './grpc/vehiculo-grpc.interface';
+import {
+  grpcErrorMessage,
+  isGrpcServiceError,
+} from '../common/grpc/grpc-error';
 
 @ApiTags('Vehiculos')
 @ApiBearerAuth()
@@ -97,7 +101,10 @@ export class VehiculosController implements OnModuleInit {
         this.vehiculoGrpcService.crearVehiculo(createVehiculoDto),
       );
     } catch (error) {
-      if (error?.code === GrpcStatus.ALREADY_EXISTS) {
+      if (
+        isGrpcServiceError(error) &&
+        error.code === GrpcStatus.ALREADY_EXISTS
+      ) {
         throw new ConflictException(
           `Ya existe un vehículo con la patente ${createVehiculoDto.patente}`,
         );
@@ -148,7 +155,7 @@ export class VehiculosController implements OnModuleInit {
       );
       return (await this.completarEstados([vehiculo]))[0];
     } catch (error) {
-      if (error?.code === GrpcStatus.NOT_FOUND) {
+      if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
       }
       this.lanzarErrorGrpc(error, 'ObtenerVehiculo');
@@ -218,7 +225,7 @@ export class VehiculosController implements OnModuleInit {
         this.vehiculoGrpcService.actualizarVehiculo(request),
       );
     } catch (error) {
-      if (error?.code === GrpcStatus.NOT_FOUND) {
+      if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
       }
       this.lanzarErrorGrpc(error, 'ActualizarVehiculo');
@@ -231,10 +238,10 @@ export class VehiculosController implements OnModuleInit {
    * de dejar que la excepción cruda de gRPC llegue al filtro por defecto
    * de Nest.
    */
-  private lanzarErrorGrpc(error: any, operacion: string): never {
+  private lanzarErrorGrpc(error: unknown, operacion: string): never {
     throw new InternalServerErrorException(
       `Vehicle Service no pudo completar ${operacion}: ` +
-        (error?.details ?? error?.message ?? 'error desconocido'),
+        grpcErrorMessage(error),
     );
   }
 

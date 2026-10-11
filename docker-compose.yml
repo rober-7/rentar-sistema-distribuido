@@ -12,6 +12,7 @@ services:
     volumes:
       - customer_db_data:/var/lib/postgresql/data
       - ./services/customer-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./services/customer-service/db/002-seed.sql:/docker-entrypoint-initdb.d/002-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U customer -d customer_db"]
       interval: 5s
@@ -31,6 +32,7 @@ services:
     volumes:
       - vehicle_db_data:/var/lib/postgresql/data
       - ./services/vehicle-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./services/vehicle-service/db/002-seed.sql:/docker-entrypoint-initdb.d/002-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vehicle -d vehicle_db"]
       interval: 5s
@@ -50,6 +52,7 @@ services:
     volumes:
       - rental_db_data:/var/lib/postgresql/data
       - ./services/rental-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./services/rental-service/db/002-seed.sql:/docker-entrypoint-initdb.d/002-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rental -d rental_db"]
       interval: 5s
