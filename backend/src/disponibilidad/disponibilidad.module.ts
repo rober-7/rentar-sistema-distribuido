@@ -1,11 +1,17 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { Vehiculo } from '../vehiculos/entities/vehiculo.entity';
+import { ClientsModule } from '@nestjs/microservices';
 import { DisponibilidadResolver } from './disponibilidad.resolver';
 import { DisponibilidadService } from './disponibilidad.service';
+import { vehiculoGrpcClientOptions } from '../vehiculos/vehiculos.grpc-client';
+import { rentalGrpcClientOptions } from '../reservas/rental.grpc-client';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Vehiculo])],
+  imports: [
+    ClientsModule.register([
+      vehiculoGrpcClientOptions(),
+      rentalGrpcClientOptions(),
+    ]),
+  ],
   providers: [DisponibilidadResolver, DisponibilidadService],
 })
 export class DisponibilidadModule {}

@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package clientes;
+
+// Customer Service - gestiona el dominio de clientes (Hito 2).
+service ClienteService {
+  rpc ListarClientes(ListarClientesRequest) returns (ListarClientesResponse);
+  rpc ObtenerCliente(ObtenerClienteRequest) returns (Cliente);
+  rpc VerificarExistencia(VerificarExistenciaRequest) returns (VerificarExistenciaResponse);
+  rpc VerificarActivo(VerificarActivoRequest) returns (VerificarActivoResponse);
+  rpc CrearCliente (CrearClienteRequest) returns (Cliente);
+  rpc ActualizarCliente (ActualizarClienteRequest) returns (Cliente);
+  rpc EliminarCliente (EliminarClienteRequest) returns (Cliente);
+  // Usado por el Gateway para el login: el Customer Service es el único que
+  // conoce passwordHash, la comparación bcrypt se hace acá adentro y nunca
+  // viaja el hash por la red.
+  rpc ValidarLogin (ValidarLoginRequest) returns (ValidarLoginResponse);
+}
+
+message Cliente {
+  int32 id = 1;
+  string documento = 2;
+  string nombre = 3;
+  string apellido = 4;
+  string email = 5;
+  optional string telefono = 6;
+  string fecha_nacimiento = 7;
+  bool activo = 8;
+}
+
+message ListarClientesRequest {}
+
+message ListarClientesResponse {
+  repeated Cliente clientes = 1;
+}
+
+message ObtenerClienteRequest {
+  int32 id = 1;
+}
+
+message VerificarExistenciaRequest {
+  int32 id = 1;
+}
+
+message VerificarExistenciaResponse {
+  bool existe = 1;
+}
+
+message VerificarActivoRequest {
+  int32 id = 1;
+}
+
+message VerificarActivoResponse {
+  bool activo = 1;
+}
+
+message CrearClienteRequest {
+  string documento = 1;
+  string nombre = 2;
+  string apellido = 3;
+  string email = 4;
+  string telefono = 5;
+  string fecha_nacimiento = 6;
+  string password = 7;
+  // Si no se manda, el servicio lo crea como CLIENTE (comportamiento
+  // original). El DTO REST público (POST /clientes) nunca expone este
+  // campo; solo lo usa el bootstrap interno del Gateway para crear el
+  // usuario ADMIN inicial.
+  optional string rol = 8;
+}
+
+message ActualizarClienteRequest {
+  int32 id = 1;
+  // optional permite que si no mandan el campo, no se sobreescriba
+  optional string nombre = 2;
+  optional string apellido = 3;
+  optional string telefono = 4;
+  optional string fecha_nacimiento = 5;
+  optional bool activo = 6;
+}
+
+message EliminarClienteRequest {
+  int32 id = 1;
+}
+
+message ValidarLoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message ValidarLoginResponse {
+  bool valido = 1;
+  optional int32 id = 2;
+  optional string email = 3;
+  optional string rol = 4;
+}

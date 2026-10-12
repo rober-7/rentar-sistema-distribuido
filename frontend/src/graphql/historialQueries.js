@@ -1,8 +1,7 @@
-import { gql } from '@apollo/client';
-
+import { gql } from "@apollo/client";
 export const CONSULTAR_HISTORIAL = gql`
-  query HistorialAlquileres($clienteId: Int!) {
-    historialAlquileres(clienteId: $clienteId) {
+  query HistorialAlquileres {
+    historialAlquileres {
       vehiculo
       patente
       fechaInicio

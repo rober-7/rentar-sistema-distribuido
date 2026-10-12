@@ -1,186 +1,212 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
+  OnModuleInit,
+  Inject,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, MoreThan, Repository } from 'typeorm';
-import { Reserva } from './entities/reserva.entity';
+import { status as GrpcStatus } from '@grpc/grpc-js';
+import { ClientGrpc } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 import { CreateReservaDto } from './dto/create-reserva.dto';
 import { FiltroReservasInput } from './dto/filtro-reservas.input';
 import { ReservaConsulta } from './dto/reserva-consulta.type';
-import { Cliente } from '../clientes/entities/cliente.entity';
-import { Vehiculo } from '../vehiculos/entities/vehiculo.entity';
-import { calcularImporte } from '../common/utils/calcular-importe';
-import { EstadoReserva } from './enums/estado-reserva.enum';
+import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
+import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
+import { ClienteServiceGrpcClient } from '../clientes/grpc/cliente-grpc.interface';
+import { ClienteGrpc } from '../clientes/grpc/cliente-grpc.interface';
+import { CLIENTE_PACKAGE } from '../clientes/clientes.constants';
+import { VehiculoServiceGrpcClient } from '../vehiculos/grpc/vehiculo-grpc.interface';
+import { VehiculoGrpc } from '../vehiculos/grpc/vehiculo-grpc.interface';
+import { VEHICULO_PACKAGE } from '../vehiculos/vehiculos.constants';
+import { RENTAL_PACKAGE } from './rental.constants';
+import {
+  ReservaGrpc,
+  ReservaServiceGrpcClient,
+} from './grpc/reserva-grpc.interface';
 
 @Injectable()
-export class ReservasService {
+export class ReservasService implements OnModuleInit {
+  private reservasGrpc: ReservaServiceGrpcClient;
+  private clientesGrpc: ClienteServiceGrpcClient;
+  private vehiculosGrpc: VehiculoServiceGrpcClient;
+
   constructor(
-    @InjectRepository(Reserva)
-    private readonly reservasRepository: Repository<Reserva>,
+    @Inject(RENTAL_PACKAGE) private readonly rentalClient: ClientGrpc,
+    @Inject(CLIENTE_PACKAGE) private readonly customerClient: ClientGrpc,
+    @Inject(VEHICULO_PACKAGE) private readonly vehicleClient: ClientGrpc,
   ) {}
 
-  async findAll(filtro: FiltroReservasInput): Promise<ReservaConsulta[]> {
-    if (filtro.desde && filtro.hasta && filtro.hasta < filtro.desde) {
+  onModuleInit() {
+    this.reservasGrpc =
+      this.rentalClient.getService<ReservaServiceGrpcClient>('ReservaService');
+    this.clientesGrpc =
+      this.customerClient.getService<ClienteServiceGrpcClient>(
+        'ClienteService',
+      );
+    this.vehiculosGrpc =
+      this.vehicleClient.getService<VehiculoServiceGrpcClient>(
+        'VehiculoService',
+      );
+  }
+
+  async findAll(
+    filtro: FiltroReservasInput,
+    user: AuthenticatedUser,
+  ): Promise<ReservaConsulta[]> {
+    if (filtro.desde && filtro.hasta && filtro.hasta < filtro.desde)
       throw new BadRequestException(
         'La fecha de finalización del filtro debe ser posterior a la fecha de inicio',
       );
-    }
 
-    const query = this.reservasRepository
-      .createQueryBuilder('reserva')
-      .innerJoinAndSelect('reserva.cliente', 'cliente')
-      .innerJoinAndSelect('reserva.vehiculo', 'vehiculo')
-      .orderBy('reserva.fechaInicio', 'DESC');
+    const filtroAplicado =
+      user.rol === RolUsuario.CLIENTE
+        ? { ...filtro, clienteId: user.id }
+        : filtro;
+    const response = await firstValueFrom(
+      this.reservasGrpc.consultarReservas({
+        ...(filtroAplicado.clienteId !== undefined && {
+          clienteId: filtroAplicado.clienteId,
+        }),
+        ...(filtroAplicado.estado && { estado: filtroAplicado.estado }),
+      }),
+    );
+    const reservas = response.reservas ?? [];
+    if (reservas.length === 0) return [];
 
-    if (filtro.clienteId) {
-      query.andWhere('cliente.id = :clienteId', {
-        clienteId: filtro.clienteId,
-      });
-    }
-    if (filtro.vehiculoId) {
-      query.andWhere('vehiculo.id = :vehiculoId', {
-        vehiculoId: filtro.vehiculoId,
-      });
-    }
-    if (filtro.tipoVehiculo) {
-      query.andWhere('vehiculo.tipoVehiculo = :tipoVehiculo', {
-        tipoVehiculo: filtro.tipoVehiculo,
-      });
-    }
-    if (filtro.estado) {
-      query.andWhere('reserva.estado = :estado', { estado: filtro.estado });
-    }
-    if (filtro.desde) {
-      query.andWhere('reserva.fechaFinalizacion >= :desde', {
-        desde: filtro.desde,
-      });
-    }
-    if (filtro.hasta) {
-      query.andWhere('reserva.fechaInicio <= :hasta', {
-        hasta: filtro.hasta,
-      });
-    }
+    const [clientes, vehiculos] = await Promise.all([
+      firstValueFrom(this.clientesGrpc.listarClientes({})),
+      firstValueFrom(this.vehiculosGrpc.listarVehiculos({})),
+    ]);
+    const clientesPorId = new Map<number, ClienteGrpc>(
+      (clientes.clientes ?? []).map((cliente) => [cliente.id, cliente]),
+    );
+    const vehiculosPorId = new Map<number, VehiculoGrpc>(
+      (vehiculos.vehiculos ?? []).map((vehiculo) => [vehiculo.id, vehiculo]),
+    );
 
-    const reservas = await query.getMany();
-
-    return reservas.map((reserva) => ({
-      id: reserva.id,
-      cliente: `${reserva.cliente.nombre} ${reserva.cliente.apellido}`,
-      clienteId: reserva.cliente.id,
-      vehiculo: `${reserva.vehiculo.marca} ${reserva.vehiculo.modelo}`,
-      vehiculoId: reserva.vehiculo.id,
-      patente: reserva.vehiculo.patente,
-      fechaInicio: reserva.fechaInicio,
-      fechaFinalizacion: reserva.fechaFinalizacion,
-      precioDiario: reserva.vehiculo.precioDiario,
-      importeTotal: reserva.importeTotal,
-      estado: reserva.estado,
-    }));
+    return reservas
+      .filter((reserva) => {
+        const vehiculo = vehiculosPorId.get(reserva.vehiculoId);
+        if (!vehiculo) {
+          throw new InternalServerErrorException(
+            `No se pudieron resolver los datos del vehículo ${reserva.vehiculoId}`,
+          );
+        }
+        if (
+          filtroAplicado.vehiculoId &&
+          reserva.vehiculoId !== filtroAplicado.vehiculoId
+        )
+          return false;
+        if (
+          filtroAplicado.tipoVehiculo &&
+          vehiculo.tipoVehiculo !== filtroAplicado.tipoVehiculo
+        )
+          return false;
+        if (
+          filtroAplicado.desde &&
+          new Date(reserva.fechaFinalizacion) < filtroAplicado.desde
+        )
+          return false;
+        if (
+          filtroAplicado.hasta &&
+          new Date(reserva.fechaInicio) > filtroAplicado.hasta
+        )
+          return false;
+        return true;
+      })
+      .map((reserva) => {
+        const cliente = clientesPorId.get(reserva.clienteId);
+        const vehiculo = vehiculosPorId.get(reserva.vehiculoId);
+        if (!cliente || !vehiculo) {
+          throw new InternalServerErrorException(
+            `No se pudieron resolver los datos relacionados de la reserva ${reserva.id}`,
+          );
+        }
+        return this.toReservaConsulta(reserva, cliente, vehiculo);
+      });
   }
 
-  async create(dto: CreateReservaDto): Promise<Reserva> {
-    const fechaInicio = new Date(dto.fechaInicio);
-    const fechaFinalizacion = new Date(dto.fechaFinalizacion);
-
-    if (
-      !Number.isFinite(fechaInicio.getTime()) ||
-      !Number.isFinite(fechaFinalizacion.getTime())
-    ) {
-      throw new BadRequestException('Las fechas deben ser válidas');
-    }
-    if (fechaInicio.getTime() <= Date.now()) {
-      throw new BadRequestException('La fecha de inicio debe ser futura');
-    }
-    if (fechaFinalizacion <= fechaInicio) {
-      throw new BadRequestException(
-        'La fecha de finalización debe ser posterior a la fecha de inicio',
+  async create(dto: CreateReservaDto, clienteId: number) {
+    try {
+      // Rental Service valida cliente y vehículo por gRPC y garantiza en su
+      // propia base, mediante una restricción EXCLUDE, que no haya solapamientos.
+      const reserva = await firstValueFrom(
+        this.reservasGrpc.crearReserva({
+          vehiculoId: dto.vehiculo,
+          clienteId,
+          fechaInicio: dto.fechaInicio,
+          fechaFinalizacion: dto.fechaFinalizacion,
+        }),
       );
+      return {
+        id: reserva.id,
+        vehiculo: { id: reserva.vehiculoId },
+        cliente: { id: reserva.clienteId },
+        fechaInicio: new Date(reserva.fechaInicio),
+        fechaFinalizacion: new Date(reserva.fechaFinalizacion),
+        importeTotal: reserva.importeTotal,
+        estado: reserva.estado,
+        activo: reserva.activo,
+      };
+    } catch (error) {
+      this.mapGrpcError(error);
     }
-
-    return this.reservasRepository.manager.transaction(async (manager) => {
-      // Serializa las altas del mismo vehículo, incluso entre instancias del backend.
-      const vehiculo = await manager.findOne(Vehiculo, {
-        where: { id: dto.vehiculo },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!vehiculo) {
-        throw new NotFoundException(
-          `No existe un vehículo con id ${dto.vehiculo}`,
-        );
-      }
-      if (!vehiculo.activo) {
-        throw new ConflictException('El vehículo está inactivo');
-      }
-
-      const cliente = await manager.findOne(Cliente, {
-        where: { id: dto.cliente },
-        lock: { mode: 'pessimistic_read' },
-      });
-      if (!cliente) {
-        throw new NotFoundException(
-          `No existe un cliente con id ${dto.cliente}`,
-        );
-      }
-      if (!cliente.activo) {
-        throw new ConflictException('El cliente está inactivo');
-      }
-
-      // Intervalos [inicio, fin): una reserva puede comenzar cuando termina otra.
-      const solapada = await manager.exists(Reserva, {
-        where: {
-          vehiculo: { id: vehiculo.id },
-          activo: true,
-          estado: EstadoReserva.CONFIRMADA,
-          fechaInicio: LessThan(fechaFinalizacion),
-          fechaFinalizacion: MoreThan(fechaInicio),
-        },
-      });
-      if (solapada) {
-        throw new ConflictException(
-          'El vehículo ya está reservado para esas fechas',
-        );
-      }
-
-      const reserva = manager.create(Reserva, {
-        cliente,
-        vehiculo,
-        fechaInicio,
-        fechaFinalizacion,
-        importeTotal: calcularImporte(
-          vehiculo.precioDiario,
-          fechaInicio,
-          fechaFinalizacion,
-        ),
-        estado: EstadoReserva.CONFIRMADA,
-        activo: true,
-      });
-      return manager.save(Reserva, reserva);
-    });
   }
 
-  async cancel(id: number): Promise<Reserva> {
-    return this.reservasRepository.manager.transaction(async (manager) => {
-      const reserva = await manager.findOne(Reserva, {
-        where: { id },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!reserva) {
-        throw new NotFoundException(`No existe una reserva con id ${id}`);
-      }
-      if (reserva.estado === EstadoReserva.CANCELADA) {
-        throw new ConflictException('La reserva ya está cancelada');
-      }
-      if (reserva.fechaInicio.getTime() <= Date.now()) {
-        throw new ConflictException(
-          'No se puede cancelar una reserva cuyo alquiler ya comenzó',
-        );
-      }
+  async cancel(id: number, clienteId: number): Promise<ReservaGrpc> {
+    try {
+      return await firstValueFrom(
+        this.reservasGrpc.cancelarReserva({ id, clienteId }),
+      );
+    } catch (error) {
+      this.mapGrpcError(error);
+    }
+  }
 
-      reserva.estado = EstadoReserva.CANCELADA;
-      return manager.save(Reserva, reserva);
-    });
+  private toReservaConsulta(
+    reserva: ReservaGrpc,
+    cliente: ClienteGrpc,
+    vehiculo: VehiculoGrpc,
+  ): ReservaConsulta {
+    return {
+      id: reserva.id,
+      cliente: `${cliente.nombre} ${cliente.apellido}`,
+      clienteId: reserva.clienteId,
+      vehiculo: `${vehiculo.marca} ${vehiculo.modelo}`,
+      vehiculoId: reserva.vehiculoId,
+      patente: vehiculo.patente,
+      fechaInicio: new Date(reserva.fechaInicio),
+      fechaFinalizacion: new Date(reserva.fechaFinalizacion),
+      precioDiario: vehiculo.precioDiario,
+      importeTotal: reserva.importeTotal,
+      estado: reserva.estado as ReservaConsulta['estado'],
+    };
+  }
+
+  private mapGrpcError(error: unknown): never {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? error.code
+        : undefined;
+    const details =
+      typeof error === 'object' && error !== null && 'details' in error
+        ? String(error.details)
+        : 'Error al procesar la reserva';
+
+    if (code === GrpcStatus.INVALID_ARGUMENT)
+      throw new BadRequestException(details);
+    if (code === GrpcStatus.NOT_FOUND) throw new NotFoundException(details);
+    if (code === GrpcStatus.PERMISSION_DENIED)
+      throw new ForbiddenException(details);
+    if (
+      code === GrpcStatus.ALREADY_EXISTS ||
+      code === GrpcStatus.FAILED_PRECONDITION
+    )
+      throw new ConflictException(details);
+    throw error;
   }
 }

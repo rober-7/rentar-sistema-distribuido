@@ -1,16 +1,16 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Container, Table, Button, Alert } from 'react-bootstrap';
-import { useQuery } from '@apollo/client/react';
-import NavBarCliente from '../components/NavBarCliente';
-import { CONSULTAR_RESERVAS } from '../graphql/reservasQueries';
-import { cancelarReserva } from '../services/reservas.service';
-import { obtenerClienteActual } from '../utils/clienteActual';
-import Swal from 'sweetalert2';
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Container, Table, Button, Alert } from "react-bootstrap";
+import { useQuery } from "@apollo/client/react";
+import NavBarCliente from "../components/NavBarCliente";
+import { CONSULTAR_RESERVAS } from "../graphql/reservasQueries";
+import { cancelarReserva } from "../services/reservas.service";
+import { obtenerClienteActual } from "../utils/clienteActual";
+import Swal from "sweetalert2";
 
 const ESTADO_BADGE = {
-  CONFIRMADA: 'success',
-  CANCELADA: 'secondary',
+  CONFIRMADA: "success",
+  CANCELADA: "secondary",
 };
 
 export default function MisReservas() {
@@ -19,9 +19,7 @@ export default function MisReservas() {
   const [cancelandoId, setCancelandoId] = useState(null);
 
   const { data, loading, error, refetch } = useQuery(CONSULTAR_RESERVAS, {
-    variables: { filtro: { clienteId: clienteActual?.id } },
-    skip: !clienteActual,
-    fetchPolicy: 'network-only',
+    fetchPolicy: "network-only",
   });
 
   if (!clienteActual) {
@@ -30,8 +28,10 @@ export default function MisReservas() {
         <NavBarCliente />
         <Container className="mt-5">
           <Alert variant="warning">
-            Todavía no te identificaste como cliente.{' '}
-            <Alert.Link onClick={() => navigate('/cliente')}>Volver al inicio</Alert.Link>
+            Todavía no te identificaste como cliente.{" "}
+            <Alert.Link onClick={() => navigate("/cliente")}>
+              Volver al inicio
+            </Alert.Link>
           </Alert>
         </Container>
       </>
@@ -41,28 +41,33 @@ export default function MisReservas() {
   const reservas = data?.reservas || [];
 
   const puedeCancelar = (reserva) =>
-    reserva.estado === 'CONFIRMADA' && new Date(reserva.fechaInicio) > new Date();
+    reserva.estado === "CONFIRMADA" &&
+    new Date(reserva.fechaInicio) > new Date();
 
   const handleCancelar = async (reserva) => {
     const confirmacion = await Swal.fire({
-      title: '¿Cancelar reserva?',
+      title: "¿Cancelar reserva?",
       text: `Vas a cancelar la reserva del ${reserva.vehiculo} (${reserva.patente}).`,
-      icon: 'warning',
+      icon: "warning",
       showCancelButton: true,
-      confirmButtonColor: '#dc3545',
-      cancelButtonColor: '#6c757d',
-      confirmButtonText: 'Sí, cancelar',
-      cancelButtonText: 'Volver',
+      confirmButtonColor: "#dc3545",
+      cancelButtonColor: "#6c757d",
+      confirmButtonText: "Sí, cancelar",
+      cancelButtonText: "Volver",
     });
     if (!confirmacion.isConfirmed) return;
 
     setCancelandoId(reserva.id);
     try {
       await cancelarReserva(reserva.id);
-      await Swal.fire('Cancelada', 'La reserva fue cancelada correctamente.', 'success');
+      await Swal.fire(
+        "Cancelada",
+        "La reserva fue cancelada correctamente.",
+        "success",
+      );
       refetch();
     } catch (error) {
-      Swal.fire('No se pudo cancelar', error.message, 'error');
+      Swal.fire("No se pudo cancelar", error.message, "error");
     } finally {
       setCancelandoId(null);
     }
@@ -74,7 +79,11 @@ export default function MisReservas() {
       <Container className="mt-4 mb-5">
         <h2 className="mb-4">Mis Reservas</h2>
 
-        {error && <Alert variant="danger">Error al consultar tus reservas: {error.message}</Alert>}
+        {error && (
+          <Alert variant="danger">
+            Error al consultar tus reservas: {error.message}
+          </Alert>
+        )}
 
         <Table striped bordered hover responsive>
           <thead className="table-dark">
@@ -93,7 +102,9 @@ export default function MisReservas() {
             {reservas.length === 0 ? (
               <tr>
                 <td colSpan="8" className="text-center text-muted">
-                  {loading ? 'Cargando...' : 'Todavía no hiciste ninguna reserva.'}
+                  {loading
+                    ? "Cargando..."
+                    : "Todavía no hiciste ninguna reserva."}
                 </td>
               </tr>
             ) : (
@@ -106,7 +117,11 @@ export default function MisReservas() {
                   <td>${r.precioDiario}</td>
                   <td className="fw-bold">${r.importeTotal}</td>
                   <td>
-                    <span className={`badge bg-${ESTADO_BADGE[r.estado] || 'dark'}`}>{r.estado}</span>
+                    <span
+                      className={`badge bg-${ESTADO_BADGE[r.estado] || "dark"}`}
+                    >
+                      {r.estado}
+                    </span>
                   </td>
                   <td>
                     <Button
@@ -115,7 +130,7 @@ export default function MisReservas() {
                       disabled={!puedeCancelar(r) || cancelandoId === r.id}
                       onClick={() => handleCancelar(r)}
                     >
-                      {cancelandoId === r.id ? 'Cancelando...' : 'Cancelar'}
+                      {cancelandoId === r.id ? "Cancelando..." : "Cancelar"}
                     </Button>
                   </td>
                 </tr>

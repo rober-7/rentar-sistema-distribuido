@@ -1,37 +1,17 @@
-const API_URL = 'http://localhost:3000/reservas';
-
-const extraerMensajeError = async (respuesta, mensajePorDefecto) => {
-  const errorData = await respuesta.json().catch(() => null);
-  if (!errorData) return mensajePorDefecto;
-  return Array.isArray(errorData.message)
-    ? errorData.message.join('\n')
-    : errorData.message || mensajePorDefecto;
-};
-
-// POST para el alta de una reserva
-export const crearReserva = async ({ vehiculo, cliente, fechaInicio, fechaFinalizacion }) => {
-  const respuesta = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ vehiculo, cliente, fechaInicio, fechaFinalizacion }),
+import { apiFetch, errorMessage } from "./api";
+const URL = "http://localhost:3000/reservas";
+export async function crearReserva(datos) {
+  const r = await apiFetch(URL, {
+    method: "POST",
+    body: JSON.stringify(datos),
   });
-
-  if (!respuesta.ok) {
-    throw new Error(await extraerMensajeError(respuesta, 'Error al crear la reserva'));
-  }
-
-  return respuesta.json();
-};
-
-// PATCH para cancelar una reserva
-export const cancelarReserva = async (id) => {
-  const respuesta = await fetch(`${API_URL}/${id}/cancelar`, {
-    method: 'PATCH',
-  });
-
-  if (!respuesta.ok) {
-    throw new Error(await extraerMensajeError(respuesta, 'Error al cancelar la reserva'));
-  }
-
-  return respuesta.json();
-};
+  if (!r.ok)
+    throw new Error(await errorMessage(r, "Error al crear la reserva"));
+  return r.json();
+}
+export async function cancelarReserva(id) {
+  const r = await apiFetch(`${URL}/${id}/cancelar`, { method: "PATCH" });
+  if (!r.ok)
+    throw new Error(await errorMessage(r, "Error al cancelar la reserva"));
+  return r.json();
+}

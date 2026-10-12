@@ -1,4 +1,4 @@
-﻿import {
+import {
   Body,
   Controller,
   Param,
@@ -6,57 +6,95 @@
   Patch,
   Post,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ReservasService } from './reservas.service';
 import { CreateReservaDto } from './dto/create-reserva.dto';
-import { Reserva } from './entities/reserva.entity';
-
+import {
+  ReservaCreadaResponseDto,
+  ReservaResponseDto,
+} from './dto/reserva-response.dto';
+import { Authenticated } from '../auth/auth.guards';
+import { Roles } from '../auth/roles.decorator';
+import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
 @ApiTags('Reservas')
+@ApiBearerAuth()
 @Controller('reservas')
+@Authenticated()
+@Roles(RolUsuario.CLIENTE)
+@ApiResponse({ status: 401, description: 'Falta el JWT o es inválido/expiró' })
+@ApiResponse({
+  status: 403,
+  description: 'El usuario autenticado no tiene rol CLIENTE',
+})
 export class ReservasController {
-  constructor(private readonly reservasService: ReservasService) {}
-
+  constructor(private readonly reservas: ReservasService) {}
   @Post()
-  @ApiOperation({
-    summary: 'Da de alta una reserva',
-    description:
-      'Recibe los IDs del cliente y vehículo y un período futuro. Calcula el importe por bloques de 24 horas redondeados hacia arriba y crea una reserva CONFIRMADA. Permite períodos consecutivos sin solapamiento.',
-  })
-  @ApiResponse({ status: 201, description: 'Reserva creada', type: Reserva })
+  @ApiOperation({ summary: 'Crea una reserva para el cliente autenticado' })
+  @ApiResponse({ status: 201, type: ReservaCreadaResponseDto })
   @ApiResponse({
     status: 400,
     description:
-      'Datos inválidos, inicio no futuro o finalización no posterior al inicio',
+      'Datos inválidos: fechas no parseables, DTO mal formado ' +
+      '(vehiculo debe ser un entero positivo), la fecha de inicio no es ' +
+      'futura, o la fecha de finalización no es posterior a la de inicio',
   })
   @ApiResponse({
     status: 404,
-    description: 'Cliente o vehículo inexistente',
+    description:
+      'No existe un vehículo con ese id, o el cliente autenticado no ' +
+      'existe/está inactivo (puede pasar si se desactivó la cuenta ' +
+      'después de emitido el JWT)',
   })
   @ApiResponse({
     status: 409,
     description:
-      'Cliente o vehículo inactivo, vehículo en alquiler o reserva solapada',
+      'El vehículo está inactivo, o ya tiene otra reserva CONFIRMADA que ' +
+      'se superpone con el período solicitado',
   })
-  create(@Body() createReservaDto: CreateReservaDto): Promise<Reserva> {
-    return this.reservasService.create(createReservaDto);
+  create(
+    @Body() dto: CreateReservaDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reservas.create(dto, user.id);
   }
-
   @Patch(':id/cancelar')
-  @ApiOperation({
-    summary: 'Cancela una reserva antes del inicio del alquiler',
-  })
+  @ApiOperation({ summary: 'Cancela una reserva propia antes de su inicio' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({
     status: 200,
     description: 'Reserva cancelada',
-    type: Reserva,
+    type: ReservaResponseDto,
   })
-  @ApiResponse({ status: 404, description: 'No existe una reserva con ese id' })
+  @ApiResponse({
+    status: 400,
+    description: 'El id de la URL no es un número entero',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'La reserva existe pero pertenece a otro cliente',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'No existe una reserva con ese id',
+  })
   @ApiResponse({
     status: 409,
-    description: 'La reserva ya está cancelada o el alquiler ya comenzó',
+    description:
+      'La reserva ya estaba cancelada, o su alquiler ya comenzó ' +
+      '(fechaInicio ya pasó) y no se puede cancelar',
   })
-  cancel(@Param('id', ParseIntPipe) id: number): Promise<Reserva> {
-    return this.reservasService.cancel(id);
+  cancel(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.reservas.cancel(id, user.id);
   }
 }

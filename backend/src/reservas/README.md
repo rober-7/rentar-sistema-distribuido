@@ -1,4 +1,11 @@
-# Alta de reserva — Hito 1, punto 4
+# Reservas — Hito 1, punto 4 / Hito 2, punto 4
+
+El API Gateway conserva los endpoints REST y GraphQL, pero las operaciones de
+reservas y el historial se ejecutan en `services/rental-service` mediante gRPC.
+Al crear, Rental Service consulta por gRPC el estado del cliente y los datos del
+vehículo antes de guardar la reserva. El contrato está en
+`proto/reservas.proto`; Docker Compose publica el servicio internamente en
+`rental_service:50053`.
 
 `POST /reservas`, documentado en `/api/docs`.
 
@@ -18,8 +25,8 @@ importeTotal. El importe se calcula en el servidor y queda guardado en la reserv
 ## Reglas
 
 - 400: IDs o fechas inválidos, inicio no futuro, finalización no posterior al inicio.
-- 404: cliente o vehículo inexistente.
-- 409: cliente o vehículo inactivo, vehículo EN_ALQUILER o período ocupado.
+- 404: cliente inexistente o inactivo, o vehículo inexistente.
+- 409: vehículo inactivo o EN_ALQUILER, o período ocupado.
 - Sólo las reservas activas y CONFIRMADAS bloquean fechas. CANCELADA no bloquea.
 - Los intervalos son [inicio, fin): se permiten reservas consecutivas.
 - El TP no especifica cómo cobrar fracciones de día. Se adoptan bloques de 24 horas
@@ -28,13 +35,12 @@ importeTotal. El importe se calcula en el servidor y queda guardado en la reserv
   fechas de las reservas. EN_ALQUILER se considera no disponible, ya que todavía
   no hay un registro de alquiler con fecha de devolución que permita determinar
   cuándo se liberará. La consulta de disponibilidad sigue el mismo criterio.
-- El estado del vehículo (DISPONIBLE/RESERVADO/EN_ALQUILER) no se guarda: se calcula
-  al leer el vehículo a partir de sus reservas CONFIRMADAS vigentes (ver
-  `VehiculosService`). Así, cancelar una reserva o que termine su período no puede
-  dejar el campo desactualizado.
-- La transacción bloquea el vehículo antes de consultar solapamientos e insertar.
-  Dos altas simultáneas por este servicio no pueden confirmar el mismo período.
-- El cliente se recibe como ID porque este módulo todavía no tiene autenticación.
+- El estado del vehículo (DISPONIBLE/RESERVADO/EN_ALQUILER) se deriva en Rental
+  Service a partir de las reservas CONFIRMADAS vigentes y el Gateway lo combina
+  con la información propia de Vehicle Service.
+- Rental DB tiene una restricción `EXCLUDE` sobre vehículo y rango temporal.
+  PostgreSQL rechaza atómicamente dos altas simultáneas superpuestas.
+- El cliente se obtiene del JWT en el Gateway y se envía como ID a Rental Service.
 
 ## Pruebas con PostgreSQL
 

@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package reservas;
+
+// Rental Service - gestiona el dominio de reservas y alquileres (Hito 2).
+
+service ReservaService {
+  rpc CrearReserva(CrearReservaRequest) returns (Reserva);
+  rpc ConsultarReservas(ConsultarReservasRequest) returns (ConsultarReservasResponse);
+  rpc CancelarReserva(CancelarReservaRequest) returns (Reserva);
+  rpc ConsultarHistorial(ConsultarHistorialRequest) returns (ConsultarHistorialResponse);
+  rpc ConsultarVehiculosOcupados(ConsultarVehiculosOcupadosRequest) returns (ConsultarVehiculosOcupadosResponse);
+  rpc ConsultarEstadosVehiculos(ConsultarEstadosVehiculosRequest) returns (ConsultarEstadosVehiculosResponse);
+}
+
+enum EstadoReserva {
+  ESTADO_RESERVA_UNSPECIFIED = 0;
+  CONFIRMADA = 1;
+  CANCELADA = 2;
+  FINALIZADA = 3;
+}
+
+message Reserva {
+  int32 id = 1;
+  int32 vehiculo_id = 2;
+  int32 cliente_id = 3;
+  string fecha_inicio = 4;
+  string fecha_finalizacion = 5;
+  double importe_total = 6;
+  EstadoReserva estado = 7;
+  bool activo = 8;
+}
+
+message CrearReservaRequest {
+  int32 vehiculo_id = 1;
+  int32 cliente_id = 2;
+  string fecha_inicio = 3;
+  string fecha_finalizacion = 4;
+}
+
+message ConsultarReservasRequest {
+  optional int32 cliente_id = 1;
+  optional EstadoReserva estado = 2;
+}
+
+message ConsultarReservasResponse {
+  repeated Reserva reservas = 1;
+}
+
+message CancelarReservaRequest {
+  int32 id = 1;
+  int32 cliente_id = 2;
+}
+
+message ConsultarHistorialRequest {
+  optional int32 cliente_id = 1;
+}
+
+message ConsultarHistorialResponse {
+  repeated Reserva reservas = 1;
+}
+
+message ConsultarVehiculosOcupadosRequest {
+  string fecha_inicio = 1;
+  string fecha_finalizacion = 2;
+}
+
+message ConsultarVehiculosOcupadosResponse {
+  repeated int32 vehiculo_ids = 1;
+}
+
+message ConsultarEstadosVehiculosRequest {
+  repeated int32 vehiculo_ids = 1;
+}
+
+message EstadoVehiculoReserva {
+  int32 vehiculo_id = 1;
+  string estado = 2;
+}
+
+message ConsultarEstadosVehiculosResponse {
+  repeated EstadoVehiculoReserva estados = 1;
+}

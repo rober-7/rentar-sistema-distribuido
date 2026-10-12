@@ -1,30 +1,36 @@
 import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
 import { TipoVehiculo } from '../../vehiculos/enums/tipo-vehiculo.enum';
 
-@ObjectType()
+@ObjectType({
+  description:
+    'Un vehículo que está libre durante todo el período consultado en ' +
+    'vehiculosDisponibles (sin reservas CONFIRMADAS que se superpongan).',
+})
 export class VehiculoDisponible {
-  @Field(() => Int)
+  @Field(() => Int, { description: 'Identificador único del vehículo' })
   id: number;
 
-  @Field()
+  @Field({ description: 'Patente del vehículo' })
   patente: string;
 
-  @Field()
+  @Field({ description: 'Marca del vehículo (ej. Toyota)' })
   marca: string;
 
-  @Field()
+  @Field({ description: 'Modelo del vehículo (ej. Corolla)' })
   modelo: string;
 
-  @Field(() => Int)
+  @Field(() => Int, { description: 'Año de fabricación' })
   anio: number;
 
-  @Field({ nullable: true })
+  @Field({ nullable: true, description: 'Color del vehículo, si está cargado' })
   color: string | null;
 
-  @Field(() => TipoVehiculo)
+  @Field(() => TipoVehiculo, { description: 'Categoría del vehículo' })
   tipoVehiculo: TipoVehiculo;
 
-  @Field(() => Float)
+  @Field(() => Float, {
+    description: 'Precio de alquiler por día, en la moneda del sistema',
+  })
   precioDiario: number;
 
   @Field(() => Float, {

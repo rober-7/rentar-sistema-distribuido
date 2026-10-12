@@ -1,4 +1,4 @@
-﻿import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { IsDateString, IsInt, IsNotEmpty, IsPositive } from 'class-validator';
 
 export class CreateReservaDto {
@@ -6,11 +6,6 @@ export class CreateReservaDto {
   @IsInt()
   @IsPositive()
   vehiculo: number;
-
-  @ApiProperty({ example: 5, description: 'ID del cliente' })
-  @IsInt()
-  @IsPositive()
-  cliente: number;
 
   @ApiProperty({
     example: '2026-09-20T10:00:00-03:00',

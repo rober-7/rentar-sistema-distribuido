@@ -1,0 +1,1 @@
+export const CLIENTE_PACKAGE = 'CLIENTE_PACKAGE';
