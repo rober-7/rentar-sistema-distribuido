@@ -158,6 +158,15 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 grpc.StatusCode.FAILED_PRECONDITION,
                 f"El vehículo con id {request.vehiculo_id} está inactivo",
             )
+        if (
+            vehiculo.HasField("verificacion")
+            and vehiculo.verificacion == vehiculos_pb2.ROBADO
+        ):
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"El vehículo con id {request.vehiculo_id} está denunciado "
+                "como robado y no admite nuevas reservas",
+            )
 
         dias = math.ceil((fin - inicio).total_seconds() / 86_400)
         precio_centavos = int(

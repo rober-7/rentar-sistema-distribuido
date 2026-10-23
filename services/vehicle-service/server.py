@@ -13,6 +13,12 @@ Gateway, ver test manual en la sesión), pero hoy ningún endpoint del Gateway
 lo invoca: tiene sentido recién cuando exista el Rental Service, que lo
 llamaría al crear/cancelar una reserva. Ver nota en el método sobre la tensión
 con el derive-on-read de estado.
+
+Hito 3: al crear un vehículo se publica vehiculos.verificacion.solicitada y
+el resultado (vehiculos.verificacion.resultado) llega de forma asíncrona por
+RabbitMQ. La verificación se guarda en la columna "verificacion", separada del
+estado operativo; un vehículo ROBADO deja de ofrecerse en disponibilidad y
+Rental Service rechaza reservarlo.
 """
 
 import os
@@ -48,6 +54,7 @@ sys.path.insert(0, GENERATED_DIR)
 
 import vehiculos_pb2 as pb  # noqa: E402
 import vehiculos_pb2_grpc as pb_grpc  # noqa: E402
+from eventos import broker, contratos  # noqa: E402
 
 
 def engine_desde_env():
@@ -75,7 +82,68 @@ def _fila_a_pb(v) -> pb.Vehiculo:
     vehiculo_pb.activo = v["activo"]
     vehiculo_pb.creado_en = v["creadoEn"].isoformat()
     vehiculo_pb.actualizado_en = v["actualizadoEn"].isoformat()
+    if v["verificacion"] is not None:
+        vehiculo_pb.verificacion = pb.ResultadoVerificacion.Value(v["verificacion"])
     return vehiculo_pb
+
+
+def _solicitar_verificacion(vehiculo_id: int, patente: str) -> None:
+    # El vehículo ya quedó guardado: si el broker no está disponible no se
+    # revierte el alta, la verificación queda pendiente y se vuelve a pedir
+    # al reiniciar el servicio (ver _reintentar_verificaciones_pendientes).
+    try:
+        broker.publicar(
+            contratos.VERIFICACION_SOLICITADA,
+            {"vehiculoId": vehiculo_id, "patente": patente},
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[eventos] no se pudo solicitar la verificación de {patente} "
+            f"({error!r}); queda pendiente",
+            flush=True,
+        )
+
+
+def _reintentar_verificaciones_pendientes(engine) -> None:
+    with engine.connect() as conn:
+        pendientes = conn.execute(
+            text("SELECT id, patente FROM vehiculos WHERE verificacion IS NULL")
+        ).mappings().all()
+    for v in pendientes:
+        _solicitar_verificacion(v["id"], v["patente"])
+
+
+def _registrar_resultado_verificacion(engine, payload: dict, _evento: dict) -> None:
+    # Idempotente: recibir dos veces el mismo resultado deja el mismo valor.
+    with engine.begin() as conn:
+        fila = conn.execute(
+            text(
+                """
+                UPDATE vehiculos
+                SET verificacion = :resultado, "actualizadoEn" = now()
+                WHERE id = :id AND patente = :patente
+                RETURNING id
+                """
+            ),
+            {
+                "id": payload["vehiculoId"],
+                "patente": payload["patente"],
+                "resultado": payload["resultado"],
+            },
+        ).first()
+    if fila is None:
+        print(
+            f"[eventos] resultado de verificación para vehículo "
+            f"{payload['vehiculoId']} ({payload['patente']}) sin vehículo "
+            f"correspondiente; se ignora",
+            flush=True,
+        )
+        return
+    print(
+        f"[eventos] vehículo {payload['vehiculoId']} ({payload['patente']}) "
+        f"verificado: {payload['resultado']}",
+        flush=True,
+    )
 
 
 class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
@@ -90,7 +158,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     """
                     SELECT id, patente, marca, modelo, anio, color,
                            "tipoVehiculo", "precioDiario", estado, activo,
-                           "creadoEn", "actualizadoEn"
+                           verificacion, "creadoEn", "actualizadoEn"
                     FROM vehiculos
                     """
                 )
@@ -111,7 +179,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     """
                     SELECT id, patente, marca, modelo, anio, color,
                            "tipoVehiculo", "precioDiario", estado, activo,
-                           "creadoEn", "actualizadoEn"
+                           verificacion, "creadoEn", "actualizadoEn"
                     FROM vehiculos
                     WHERE id = :id
                     """
@@ -132,7 +200,9 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             "[gRPC] FiltrarVehiculos invocado por el Gateway",
             flush=True,
         )
-        condiciones = ["activo = true"]
+        # Un vehículo denunciado como robado queda inhabilitado: no se ofrece
+        # en la consulta de disponibilidad. Los pendientes sí se ofrecen.
+        condiciones = ["activo = true", "verificacion IS DISTINCT FROM 'ROBADO'"]
         parametros = {}
 
         if request.HasField("tipo_vehiculo"):
@@ -156,7 +226,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         sql = f"""
             SELECT id, patente, marca, modelo, anio, color,
                    "tipoVehiculo", "precioDiario", estado, activo,
-                   "creadoEn", "actualizadoEn"
+                   verificacion, "creadoEn", "actualizadoEn"
             FROM vehiculos
             WHERE {' AND '.join(condiciones)}
         """
@@ -185,7 +255,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     WHERE id = :id
                     RETURNING id, patente, marca, modelo, anio, color,
                               "tipoVehiculo", "precioDiario", estado, activo,
-                              "creadoEn", "actualizadoEn"
+                              verificacion, "creadoEn", "actualizadoEn"
                     """
                 ),
                 {"id": request.id, "estado": nuevo_estado},
@@ -225,7 +295,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                          :precio_diario, 'DISPONIBLE', true, now(), now())
                     RETURNING id, patente, marca, modelo, anio, color,
                               "tipoVehiculo", "precioDiario", estado, activo,
-                              "creadoEn", "actualizadoEn"
+                              verificacion, "creadoEn", "actualizadoEn"
                     """
                 ),
                 {
@@ -239,6 +309,9 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 },
             ).mappings().first()
 
+        # Se publica después del commit: el Gateway recibe la respuesta sin
+        # esperar la verificación, que llega más tarde por RabbitMQ.
+        _solicitar_verificacion(v["id"], v["patente"])
         return _fila_a_pb(v)
 
     def ActualizarVehiculo(self, request, context):
@@ -283,7 +356,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             WHERE id = :id
             RETURNING id, patente, marca, modelo, anio, color,
                       "tipoVehiculo", "precioDiario", estado, activo,
-                      "creadoEn", "actualizadoEn"
+                      verificacion, "creadoEn", "actualizadoEn"
         """
 
         with self.engine.begin() as conn:
@@ -306,6 +379,16 @@ def main():
     server.add_insecure_port(f"[::]:{puerto}")
     print(f"Vehicle Service escuchando en puerto {puerto}", flush=True)
     server.start()
+
+    broker.escuchar(
+        contratos.COLA_VEHICULOS_VERIFICACION,
+        {
+            contratos.VERIFICACION_RESULTADO: lambda payload, evento: (
+                _registrar_resultado_verificacion(engine, payload, evento)
+            )
+        },
+    )
+    _reintentar_verificaciones_pendientes(engine)
     server.wait_for_termination()
 
 

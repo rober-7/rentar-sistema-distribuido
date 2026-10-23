@@ -40,6 +40,23 @@ import {
   grpcErrorMessage,
   isGrpcServiceError,
 } from '../common/grpc/grpc-error';
+import { VerificacionVehiculo } from './enums/verificacion-vehiculo.enum';
+
+/**
+ * Vehicle Service omite `verificacion` mientras la verificación policial
+ * está pendiente (llega después por RabbitMQ); la API lo expone explícito.
+ */
+function conVerificacion(vehiculo: VehiculoGrpc): VehiculoGrpc {
+  const resuelta =
+    vehiculo.verificacion === VerificacionVehiculo.VALIDADO ||
+    vehiculo.verificacion === VerificacionVehiculo.ROBADO;
+  return {
+    ...vehiculo,
+    verificacion: resuelta
+      ? vehiculo.verificacion
+      : VerificacionVehiculo.PENDIENTE,
+  };
+}
 
 @ApiTags('Vehiculos')
 @ApiBearerAuth()
@@ -97,8 +114,10 @@ export class VehiculosController implements OnModuleInit {
     @Body() createVehiculoDto: CreateVehiculoDto,
   ): Promise<VehiculoGrpc> {
     try {
-      return await firstValueFrom(
-        this.vehiculoGrpcService.crearVehiculo(createVehiculoDto),
+      return conVerificacion(
+        await firstValueFrom(
+          this.vehiculoGrpcService.crearVehiculo(createVehiculoDto),
+        ),
       );
     } catch (error) {
       if (
@@ -221,8 +240,10 @@ export class VehiculosController implements OnModuleInit {
       ...(color !== undefined ? { color: color ?? '' } : {}),
     };
     try {
-      return await firstValueFrom(
-        this.vehiculoGrpcService.actualizarVehiculo(request),
+      return conVerificacion(
+        await firstValueFrom(
+          this.vehiculoGrpcService.actualizarVehiculo(request),
+        ),
       );
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
@@ -258,7 +279,7 @@ export class VehiculosController implements OnModuleInit {
       (estados ?? []).map((item) => [item.vehiculoId, item.estado]),
     );
     return vehiculos.map((vehiculo) => ({
-      ...vehiculo,
+      ...conVerificacion(vehiculo),
       estado: estadoPorId.get(vehiculo.id) ?? 'DISPONIBLE',
     }));
   }

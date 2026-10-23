@@ -92,8 +92,23 @@ exactamente la estructura que pide el enunciado.
 { "vehiculoId": 15, "patente": "ABC123", "resultado": "VALIDADO" }
 ```
 
-`ROBADO` **no** es un estado del vehículo. vehicle-service lo guarda en un dato
-aparte y deja al vehículo inhabilitado para nuevas operaciones.
+`ROBADO` **no** es un estado del vehículo. vehicle-service lo guarda en la
+columna `verificacion` (NULL mientras está pendiente), separada de `estado`.
+Un vehículo `ROBADO` queda inhabilitado para nuevas operaciones:
+
+- no aparece en la consulta de disponibilidad (`FiltrarVehiculos`);
+- Rental Service rechaza crear una reserva sobre él (`FAILED_PRECONDITION`,
+  que el Gateway devuelve como 409).
+
+Un vehículo pendiente de verificación sí se puede reservar, porque la
+verificación no bloquea el alta. Si al crear un vehículo el broker no está
+disponible, el alta se guarda igual y vehicle-service vuelve a pedir la
+verificación de todos los pendientes cada vez que arranca.
+
+El registro policial simulado vive en `registros_db.patentes_robadas`. Las
+patentes de prueba denunciadas son `AD123RB`, `AE456RB`, `AF789RB` y `RBO123`;
+cualquier otra da `VALIDADO`. La consulta tiene una demora simulada de 3 s
+(`DEMORA_VERIFICACION_SEGUNDOS`) para que en la demo se vea el `PENDIENTE`.
 
 ### Incorporación de vehículos de propietarios externos
 

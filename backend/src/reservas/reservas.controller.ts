@@ -56,8 +56,8 @@ export class ReservasController {
   @ApiResponse({
     status: 409,
     description:
-      'El vehículo está inactivo, o ya tiene otra reserva CONFIRMADA que ' +
-      'se superpone con el período solicitado',
+      'El vehículo está inactivo o denunciado como robado, o ya tiene otra ' +
+      'reserva CONFIRMADA que se superpone con el período solicitado',
   })
   create(
     @Body() dto: CreateReservaDto,

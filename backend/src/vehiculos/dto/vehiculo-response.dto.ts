@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EstadoVehiculo } from '../enums/estado-vehiculo.enum';
 import { TipoVehiculo } from '../enums/tipo-vehiculo.enum';
+import { VerificacionVehiculo } from '../enums/verificacion-vehiculo.enum';
 
 export class VehiculoResponseDto {
   @ApiProperty()
@@ -32,6 +33,14 @@ export class VehiculoResponseDto {
 
   @ApiProperty()
   activo: boolean;
+
+  @ApiProperty({
+    enum: VerificacionVehiculo,
+    description:
+      'Resultado de la verificación policial de la patente, que se resuelve ' +
+      'de forma asíncrona. ROBADO inhabilita al vehículo para nuevas reservas.',
+  })
+  verificacion: VerificacionVehiculo;
 
   @ApiProperty({ format: 'date-time' })
   creadoEn: string;

@@ -8,6 +8,7 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
 - **Vehicle Service:** Python + grpcio + SQLAlchemy — `services/vehicle-service/`
 - **Customer Service:** Python + grpcio + SQLAlchemy — `services/customer-service/`
 - **Rental Service:** Python + grpcio + SQLAlchemy — `services/rental-service/`
+- **Registros Service:** Python + pika + SQLAlchemy — `services/registros-service/` (registros externos simulados, solo eventos)
 - **Comunicación Gateway ↔ servicios internos:** gRPC (contratos en `proto/`)
 - **Comunicación asíncrona entre servicios:** RabbitMQ (contratos en `eventos/`)
 - **Frontend:** React + Vite
@@ -135,7 +136,8 @@ después de modificar un `server.py` hay que reiniciar el servicio. Si cambia un
 ├── services/
 │   ├── vehicle-service/         # Vehicle Service (Python, gRPC)
 │   ├── customer-service/        # Customer Service (Python, gRPC)
-│   └── rental-service/          # Rental Service (Python, gRPC)
+│   ├── rental-service/          # Rental Service (Python, gRPC)
+│   └── registros-service/       # Registros externos simulados (Python, solo eventos)
 ├── proto/                       # Contratos gRPC (.proto) de los 3 dominios
 ├── eventos/                     # Contratos de eventos y cliente RabbitMQ compartido
 ├── frontend/                    # React + Vite
