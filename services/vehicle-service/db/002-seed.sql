@@ -8,14 +8,15 @@ INSERT INTO vehiculos (
     "tipoVehiculo",
     "precioDiario",
     estado,
+    verificacion,
     activo
 )
 SELECT *
 FROM (
     VALUES
-        (1001, 'AA100AA', 'Toyota', 'Corolla', 2023, 'Gris', 'SEDAN', 30000.00, 'DISPONIBLE', TRUE),
-        (1002, 'AB200BB', 'Ford', 'Territory', 2024, 'Negro', 'SUV', 45000.00, 'DISPONIBLE', TRUE),
-        (1003, 'AC300CC', 'Volkswagen', 'Amarok', 2022, 'Blanco', 'PICKUP', 55000.00, 'DISPONIBLE', TRUE)
+        (1001, 'AA100AA', 'Toyota', 'Corolla', 2023, 'Gris', 'SEDAN', 30000.00, 'DISPONIBLE', 'VALIDADO', TRUE),
+        (1002, 'AB200BB', 'Ford', 'Territory', 2024, 'Negro', 'SUV', 45000.00, 'DISPONIBLE', 'VALIDADO', TRUE),
+        (1003, 'AC300CC', 'Volkswagen', 'Amarok', 2022, 'Blanco', 'PICKUP', 55000.00, 'DISPONIBLE', 'VALIDADO', TRUE)
 ) AS demo(
     id,
     patente,
@@ -26,6 +27,7 @@ FROM (
     "tipoVehiculo",
     "precioDiario",
     estado,
+    verificacion,
     activo
 )
 WHERE NOT EXISTS (

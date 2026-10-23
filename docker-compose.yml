@@ -59,6 +59,26 @@ services:
       timeout: 5s
       retries: 10
 
+  registros_db:
+    image: postgres:16
+    container_name: rentar_registros_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: registros
+      POSTGRES_PASSWORD: registros
+      POSTGRES_DB: registros_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - registros_db_data:/var/lib/postgresql/data
+      - ./services/registros-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./services/registros-service/db/002-seed.sql:/docker-entrypoint-initdb.d/002-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registros -d registros_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: rentar_rabbitmq
@@ -90,6 +110,7 @@ services:
       - customer_db
       - vehicle_db
       - rental_db
+      - registros_db
 
   vehicle_service:
     build:
@@ -167,6 +188,30 @@ services:
       vehicle_service:
         condition: service_started
 
+  registros_service:
+    build:
+      context: ./services/registros-service
+      dockerfile: Dockerfile
+    container_name: rentar_registros_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: registros_db
+      DB_PORT: 5432
+      DB_USER: registros
+      DB_PASSWORD: registros
+      DB_NAME: registros_db
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: registros-service
+      DEMORA_VERIFICACION_SEGUNDOS: 3
+    volumes:
+      - ./services/registros-service:/app
+      - ./eventos:/app/eventos
+    depends_on:
+      registros_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -211,4 +256,5 @@ volumes:
   customer_db_data:
   vehicle_db_data:
   rental_db_data:
+  registros_db_data:
   rabbitmq_data:

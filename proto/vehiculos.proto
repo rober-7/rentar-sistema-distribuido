@@ -32,6 +32,16 @@ enum EstadoVehiculo {
   EN_ALQUILER = 3;
 }
 
+// Resultado de la verificación policial de la patente (Hito 3). Se resuelve
+// de forma asíncrona por eventos; mientras está pendiente el campo viene
+// ausente. No es un estado operativo: ROBADO inhabilita al vehículo para
+// nuevas operaciones sin modificar su EstadoVehiculo.
+enum ResultadoVerificacion {
+  RESULTADO_VERIFICACION_UNSPECIFIED = 0;
+  VALIDADO = 1;
+  ROBADO = 2;
+}
+
 message Vehiculo {
   int32 id = 1;
   string patente = 2;
@@ -45,6 +55,7 @@ message Vehiculo {
   bool activo = 10;
   string creado_en = 11;
   string actualizado_en = 12;
+  optional ResultadoVerificacion verificacion = 13;
 }
 
 message ListarVehiculosRequest {}

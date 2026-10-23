@@ -44,6 +44,21 @@ export default function GestionVehiculos() {
     cargarVehiculos();
   }, []);
 
+  // La verificación policial de la patente se resuelve de forma asíncrona:
+  // mientras haya vehículos pendientes se vuelve a consultar cada 2 segundos.
+  const hayPendientes = vehiculos.some((v) => v.verificacion === 'PENDIENTE');
+  useEffect(() => {
+    if (!hayPendientes) return;
+    const intervalo = setInterval(cargarVehiculos, 2000);
+    return () => clearInterval(intervalo);
+  }, [hayPendientes]);
+
+  const badgeVerificacion = (verificacion) => {
+    if (verificacion === 'ROBADO') return <span className="badge bg-danger">Robado</span>;
+    if (verificacion === 'VALIDADO') return <span className="badge bg-success">Validado</span>;
+    return <span className="badge bg-warning text-dark">Pendiente</span>;
+  };
+
   const handleChange = (e) => {
     const { name, value, checked, type } = e.target;
     const valorFinal = name === 'patente' ? value.toUpperCase() : value;
@@ -100,7 +115,7 @@ export default function GestionVehiculos() {
         await crearVehiculo(vehiculoFormateado);
         Swal.fire({
           title: '¡Guardado!',
-          text: 'El nuevo vehículo se registró correctamente.',
+          text: 'El nuevo vehículo se registró correctamente. La verificación de la patente queda en curso.',
           icon: 'success',
           confirmButtonColor: '#0d6efd'
         });
@@ -172,6 +187,7 @@ export default function GestionVehiculos() {
               <th>Tipo</th>
               <th>Precio/Día</th>
               <th>Estado</th>
+              <th>Verificación</th>
               <th>Activo?</th>
               <th>Acciones</th>
             </tr>
@@ -179,11 +195,18 @@ export default function GestionVehiculos() {
           <tbody>
             {vehiculos.length === 0 ? (
               <tr>
-                <td colSpan="10" className="text-center">No hay vehículos registrados...</td>
+                <td colSpan="11" className="text-center">No hay vehículos registrados...</td>
               </tr>
             ) : (
               vehiculos.map((v) => (
-                <tr key={v.id} className={!v.activo ? 'table-secondary text-muted' : ''}>
+                <tr
+                  key={v.id}
+                  className={
+                    !v.activo ? 'table-secondary text-muted'
+                      : v.verificacion === 'ROBADO' ? 'table-danger'
+                        : ''
+                  }
+                >
                   <td>{v.patente}</td>
                   <td>{v.marca}</td>
                   <td>{v.modelo}</td>
@@ -192,6 +215,7 @@ export default function GestionVehiculos() {
                   <td>{v.tipoVehiculo}</td>
                   <td>${v.precioDiario}</td>
                   <td>{v.estado}</td>
+                  <td>{badgeVerificacion(v.verificacion)}</td>
                   <td>
                     {v.activo ? (
                       <span className="badge bg-success">Sí</span>

@@ -13,6 +13,9 @@ export interface VehiculoGrpc {
   activo: boolean;
   creadoEn: string;
   actualizadoEn: string;
+  // Ausente mientras la verificación está pendiente; el controller lo
+  // normaliza a 'PENDIENTE' antes de responder.
+  verificacion?: string;
 }
 
 export interface FiltrarVehiculosGrpcRequest {
