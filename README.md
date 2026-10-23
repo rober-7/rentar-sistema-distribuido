@@ -9,6 +9,7 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
 - **Customer Service:** Python + grpcio + SQLAlchemy — `services/customer-service/`
 - **Rental Service:** Python + grpcio + SQLAlchemy — `services/rental-service/`
 - **Comunicación Gateway ↔ servicios internos:** gRPC (contratos en `proto/`)
+- **Comunicación asíncrona entre servicios:** RabbitMQ (contratos en `eventos/`)
 - **Frontend:** React + Vite
 - **Infraestructura:** Docker Compose
 
@@ -26,6 +27,13 @@ API Gateway
 
 El Gateway no accede a PostgreSQL. Cada servicio es dueño de su base y las
 referencias entre dominios se validan mediante gRPC.
+
+Desde el Hito 3 los servicios también se comunican por eventos a través de
+RabbitMQ, para los procesos que no necesitan una respuesta inmediata
+(verificación de patentes, incorporación de vehículos externos y mantenimiento
+preventivo). Los eventos, las colas y la forma de usarlos están documentados en
+[`eventos/README.md`](eventos/README.md). La consola de RabbitMQ queda en
+http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
 
 ## Cómo levantar el proyecto (para el equipo)
 
@@ -129,6 +137,7 @@ después de modificar un `server.py` hay que reiniciar el servicio. Si cambia un
 │   ├── customer-service/        # Customer Service (Python, gRPC)
 │   └── rental-service/          # Rental Service (Python, gRPC)
 ├── proto/                       # Contratos gRPC (.proto) de los 3 dominios
+├── eventos/                     # Contratos de eventos y cliente RabbitMQ compartido
 ├── frontend/                    # React + Vite
 ├── docker-compose.yml
 └── README.md
