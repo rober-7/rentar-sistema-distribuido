@@ -65,7 +65,11 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    docker compose up --build
    ```
 
-   Esto levanta tres bases PostgreSQL independientes, Adminer, los tres servicios gRPC (Python), el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
+   Esto levanta cuatro bases PostgreSQL independientes, RabbitMQ, Adminer, los tres servicios gRPC (Python), Registros Service, el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
+
+   > **Si ya tenías el proyecto levantado de antes del Hito 3**, cambió el
+   > esquema de `vehicle_db` y hay bases nuevas. Regenerá todo una vez con
+   > `docker compose down -v` y después `docker compose up --build`.
 
 4. Cuando termine de levantar, vas a tener disponible:
 
@@ -76,9 +80,11 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    | Swagger   | http://localhost:3000/api/docs | Documentación y pruebas REST |
    | GraphQL   | http://localhost:3000/graphql | Consultas GraphQL              |
    | Adminer   | http://localhost:8080        | Ver tabla de abajo para entrar  |
+   | RabbitMQ  | http://localhost:15672       | Consola del broker. Usuario `rentar`, contraseña `rentar` |
    | Customer DB | localhost:5432             | PostgreSQL exclusivo de Customer Service |
    | Vehicle DB  | localhost:5433             | PostgreSQL exclusivo de Vehicle Service |
    | Rental DB   | localhost:5434             | PostgreSQL exclusivo de Rental Service |
+   | Registros DB | localhost:5435            | PostgreSQL exclusivo de Registros Service |
 
    Para entrar a **Adminer**, elegí la base que quieras inspeccionar:
 
@@ -87,6 +93,7 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    | Clientes | `customer_db` | `customer` | `customer` | `customer_db` |
    | Vehículos | `vehicle_db` | `vehicle` | `vehicle` | `vehicle_db` |
    | Reservas | `rental_db` | `rental` | `rental` | `rental_db` |
+   | Registros externos | `registros_db` | `registros` | `registros` | `registros_db` |
 
 
    ### Acceso inicial
@@ -110,6 +117,33 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    ejecutan solamente al crear los volúmenes; `docker compose down` conserva
    los datos y `docker compose down -v` permite regenerarlos desde cero.
 
+   ### Probar la verificación de vehículos
+
+   El registro policial simulado (`registros_db.patentes_robadas`) se carga
+   solo con el seed, no hace falta cargar nada a mano. Estas patentes están
+   denunciadas como robadas:
+
+   | Patentes denunciadas |
+   |---|
+   | `AD123RB`, `AE456RB`, `AF789RB`, `RBO123` |
+
+   Al crear un vehículo desde **Gestión de Vehículos**, la columna
+   *Verificación* arranca en *Pendiente* y a los pocos segundos pasa a
+   *Robado* si la patente está en esa lista, o a *Validado* si no. Un
+   vehículo robado no aparece en la consulta de disponibilidad y no se puede
+   reservar.
+
+   Para denunciar otra patente, entrá a Adminer con la base de registros
+   externos y ejecutá (la patente va en mayúsculas, sin espacios ni guiones):
+
+   ```sql
+   INSERT INTO patentes_robadas (patente, "fechaDenuncia", descripcion)
+   VALUES ('AB999CD', '2026-10-20', 'Denuncia de prueba');
+   ```
+
+   Para ver los eventos en la consola de RabbitMQ, el flujo completo y cómo
+   publicar eventos de prueba, ver [`eventos/README.md`](eventos/README.md).
+
 5. Para bajar todo: `Ctrl+C` en la terminal donde quedó corriendo, y después:
 
    ```bash
@@ -117,8 +151,8 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    ```
 
    Si además querés borrar todos los datos actuales y regenerar los esquemas y
-   seeds desde cero, usá `docker compose down -v`. Esta operación elimina los
-   tres volúmenes de datos y no se puede deshacer.
+   seeds desde cero, usá `docker compose down -v`. Esta operación elimina
+   todos los volúmenes (las bases y RabbitMQ) y no se puede deshacer.
 
 ## Hot reload
 
