@@ -1,5 +1,7 @@
 node_modules/
 dist/
+*.tsbuildinfo
+.vite/
 .env
 *.log
 schema.gql
