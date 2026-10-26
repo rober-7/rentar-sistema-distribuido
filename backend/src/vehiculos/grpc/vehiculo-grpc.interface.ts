@@ -48,6 +48,32 @@ export interface ActualizarVehiculoGrpcRequest {
   activo?: boolean;
 }
 
+export interface RegistrarVehiculoExternoGrpcRequest {
+  clienteId: number;
+  patente: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  color?: string;
+  tipoVehiculo: string;
+  precioDiario: number;
+}
+
+export interface VehiculoExternoGrpc {
+  id: number;
+  clienteId: number;
+  patente: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  color?: string;
+  tipoVehiculo: string;
+  precioDiario: number;
+  estado: string;
+  creadoEn: string;
+  actualizadoEn: string;
+}
+
 export interface VehiculoServiceGrpcClient {
   listarVehiculos(data: Record<string, never>): Observable<{
     vehiculos: VehiculoGrpc[];
@@ -60,4 +86,7 @@ export interface VehiculoServiceGrpcClient {
   actualizarVehiculo(
     data: ActualizarVehiculoGrpcRequest,
   ): Observable<VehiculoGrpc>;
+  registrarVehiculoExterno(
+    data: RegistrarVehiculoExternoGrpcRequest,
+  ): Observable<VehiculoExternoGrpc>;
 }
