@@ -14,8 +14,11 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import grpc
 from grpc_tools import protoc
+from pika.exceptions import AMQPError
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+
+from eventos import broker, contratos
 
 PROTO_DIR = os.path.join(os.path.dirname(__file__), "proto")
 GENERATED_DIR = os.path.join(os.path.dirname(__file__), "generated")
@@ -58,6 +61,72 @@ def engine_desde_env():
     name = os.environ["DB_NAME"]
     url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
     return create_engine(url, pool_pre_ping=True)
+
+
+def asegurar_esquema_mantenimiento(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE reservas
+                ADD COLUMN IF NOT EXISTS mantenimiento_resultado VARCHAR
+                    CHECK (
+                        mantenimiento_resultado IN (
+                            'REALIZADO', 'NO_REALIZADO'
+                        )
+                    )
+                """
+            )
+        )
+
+
+def _publicar_reserva_confirmada(reserva) -> None:
+    payload = {
+        "reservaId": reserva["id"],
+        "vehiculoId": reserva["vehiculo_id"],
+        "fechaInicio": reserva["fecha_inicio"].isoformat(),
+        "fechaFin": reserva["fecha_finalizacion"].isoformat(),
+    }
+    try:
+        broker.publicar(contratos.RESERVA_CONFIRMADA, payload)
+    except AMQPError as error:
+        print(
+            f"[eventos] no se pudo publicar reserva.confirmada para la "
+            f"reserva {reserva['id']} ({error!r})",
+            flush=True,
+        )
+
+
+def _registrar_resultado_mantenimiento(engine, payload: dict, _evento: dict) -> None:
+    with engine.begin() as conn:
+        reserva = conn.execute(
+            text(
+                """
+                UPDATE reservas
+                SET mantenimiento_resultado = :resultado,
+                    "actualizadoEn" = now()
+                WHERE id = :reserva_id AND vehiculo_id = :vehiculo_id
+                RETURNING id
+                """
+            ),
+            {
+                "resultado": payload["resultado"],
+                "reserva_id": payload["reservaId"],
+                "vehiculo_id": payload["vehiculoId"],
+            },
+        ).first()
+
+    if reserva is None:
+        raise ValueError(
+            "No existe la reserva "
+            f"{payload['reservaId']} para el vehículo {payload['vehiculoId']}"
+        )
+
+    print(
+        f"[eventos] mantenimiento de reserva {reserva.id}: "
+        f"{payload['resultado']}",
+        flush=True,
+    )
 
 
 def _parsear_fecha(valor: str, nombre: str, context) -> datetime:
@@ -209,6 +278,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                     "El vehículo ya está reservado para esas fechas",
                 )
             raise
+        _publicar_reserva_confirmada(reserva)
         return _fila_a_pb(reserva)
 
     def ConsultarReservas(self, request, context):
@@ -394,6 +464,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
 
 def main():
     engine = engine_desde_env()
+    asegurar_esquema_mantenimiento(engine)
     customer_channel = grpc.insecure_channel(
         os.environ.get("CUSTOMER_SERVICE_URL", "localhost:50052")
     )
@@ -408,6 +479,14 @@ def main():
     server.add_insecure_port(f"[::]:{puerto}")
     print(f"Rental Service escuchando en puerto {puerto}", flush=True)
     server.start()
+    broker.escuchar(
+        contratos.COLA_RESERVAS_MANTENIMIENTO,
+        {
+            contratos.MANTENIMIENTO_RESULTADO: lambda payload, evento: (
+                _registrar_resultado_mantenimiento(engine, payload, evento)
+            )
+        },
+    )
     server.wait_for_termination()
 
 

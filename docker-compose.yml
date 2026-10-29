@@ -79,6 +79,25 @@ services:
       timeout: 5s
       retries: 10
 
+  mantenimiento_db:
+    image: postgres:16
+    container_name: rentar_mantenimiento_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mantenimiento
+      POSTGRES_PASSWORD: mantenimiento
+      POSTGRES_DB: mantenimiento_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - mantenimiento_db_data:/var/lib/postgresql/data
+      - ./services/mantenimiento-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mantenimiento -d mantenimiento_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: rentar_rabbitmq
@@ -111,6 +130,7 @@ services:
       - vehicle_db
       - rental_db
       - registros_db
+      - mantenimiento_db
 
   vehicle_service:
     build:
@@ -212,6 +232,31 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  mantenimiento_service:
+    build:
+      context: ./services/mantenimiento-service
+      dockerfile: Dockerfile
+    container_name: rentar_mantenimiento_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: mantenimiento_db
+      DB_PORT: 5432
+      DB_USER: mantenimiento
+      DB_PASSWORD: mantenimiento
+      DB_NAME: mantenimiento_db
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: mantenimiento-service
+      DEMORA_MANTENIMIENTO_SEGUNDOS: 2
+      RESULTADO_MANTENIMIENTO: REALIZADO
+    volumes:
+      - ./services/mantenimiento-service:/app
+      - ./eventos:/app/eventos
+    depends_on:
+      mantenimiento_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -257,4 +302,5 @@ volumes:
   vehicle_db_data:
   rental_db_data:
   registros_db_data:
+  mantenimiento_db_data:
   rabbitmq_data:
