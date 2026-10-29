@@ -87,6 +87,24 @@ def _fila_a_pb(v) -> pb.Vehiculo:
     return vehiculo_pb
 
 
+def _fila_externo_a_pb(v) -> pb.VehiculoExternoResponse:
+    externo_pb = pb.VehiculoExternoResponse()
+    externo_pb.id = v["id"]
+    externo_pb.cliente_id = v["clienteId"]
+    externo_pb.patente = v["patente"]
+    externo_pb.marca = v["marca"]
+    externo_pb.modelo = v["modelo"]
+    externo_pb.anio = v["anio"]
+    if v["color"] is not None:
+        externo_pb.color = v["color"]
+    externo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(v["tipoVehiculo"])
+    externo_pb.precio_diario = float(v["precioDiario"])
+    externo_pb.estado = pb.EstadoVehiculoExterno.Value(v["estado"])
+    externo_pb.creado_en = v["creadoEn"].isoformat()
+    externo_pb.actualizado_en = v["actualizadoEn"].isoformat()
+    return externo_pb
+
+
 def _solicitar_verificacion(vehiculo_id: int, patente: str) -> None:
     # El vehículo ya quedó guardado: si el broker no está disponible no se
     # revierte el alta, la verificación queda pendiente y se vuelve a pedir
@@ -142,6 +160,93 @@ def _registrar_resultado_verificacion(engine, payload: dict, _evento: dict) -> N
     print(
         f"[eventos] vehículo {payload['vehiculoId']} ({payload['patente']}) "
         f"verificado: {payload['resultado']}",
+        flush=True,
+    )
+
+
+def _publicar_externo_registrado(
+    vehiculo_externo_id: int, cliente_id: int, patente: str
+) -> None:
+    try:
+        broker.publicar(
+            contratos.EXTERNOS_REGISTRADOS,
+            {
+                "vehiculoExternoId": vehiculo_externo_id,
+                "clienteId": cliente_id,
+                "patente": patente,
+            },
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[eventos] no se pudo publicar el registro del vehículo externo "
+            f"{vehiculo_externo_id} ({patente}) ({error!r})",
+            flush=True,
+        )
+
+
+def _completar_validacion_externo(engine, payload: dict, _evento: dict) -> None:
+    vehiculo_externo_id = payload["vehiculoExternoId"]
+    with engine.begin() as conn:
+        externo = conn.execute(
+            text(
+                """
+                SELECT id, "clienteId", patente, marca, modelo, anio, color,
+                       "tipoVehiculo", "precioDiario", estado
+                FROM vehiculos_externos
+                WHERE id = :id
+                FOR UPDATE
+                """
+            ),
+            {"id": vehiculo_externo_id},
+        ).mappings().first()
+
+        if externo is None:
+            print(
+                f"[eventos] validación completada para vehículo externo "
+                f"{vehiculo_externo_id} inexistente; se ignora",
+                flush=True,
+            )
+            return
+
+        conn.execute(
+            text(
+                """
+                UPDATE vehiculos_externos
+                SET estado = 'APROBADO', "actualizadoEn" = now()
+                WHERE id = :id
+                """
+            ),
+            {"id": vehiculo_externo_id},
+        )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO vehiculos
+                    (patente, marca, modelo, anio, color, "tipoVehiculo",
+                     "precioDiario", estado, verificacion, activo,
+                     "creadoEn", "actualizadoEn")
+                VALUES
+                    (:patente, :marca, :modelo, :anio, :color, :tipo_vehiculo,
+                     :precio_diario, 'DISPONIBLE', 'VALIDADO', true,
+                     now(), now())
+                ON CONFLICT (patente) DO NOTHING
+                """
+            ),
+            {
+                "patente": externo["patente"],
+                "marca": externo["marca"],
+                "modelo": externo["modelo"],
+                "anio": externo["anio"],
+                "color": externo["color"],
+                "tipo_vehiculo": externo["tipoVehiculo"],
+                "precio_diario": externo["precioDiario"],
+            },
+        )
+
+    print(
+        f"[eventos] vehículo externo {vehiculo_externo_id} "
+        f"({externo['patente']}) aprobado e incorporado como DISPONIBLE",
         flush=True,
     )
 
@@ -368,6 +473,69 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 )
         return _fila_a_pb(v)
 
+    def RegistrarVehiculoExterno(self, request, context):
+        print(
+            f"[gRPC] RegistrarVehiculoExterno({request.patente}, "
+            f"cliente={request.cliente_id}) invocado por el Gateway",
+            flush=True,
+        )
+        with self.engine.begin() as conn:
+            existente_vehiculo = conn.execute(
+                text("SELECT 1 FROM vehiculos WHERE patente = :patente"),
+                {"patente": request.patente},
+            ).first()
+            if existente_vehiculo is not None:
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Ya existe un vehículo con la patente {request.patente}",
+                )
+
+            existente_externo = conn.execute(
+                text(
+                    """
+                    SELECT 1 FROM vehiculos_externos
+                    WHERE patente = :patente AND estado IN ('PENDIENTE', 'APROBADO')
+                    """
+                ),
+                {"patente": request.patente},
+            ).first()
+            if existente_externo is not None:
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Ya existe una solicitud en trámite o aprobada para la patente {request.patente}",
+                )
+
+            ve = conn.execute(
+                text(
+                    """
+                    INSERT INTO vehiculos_externos
+                        ("clienteId", patente, marca, modelo, anio, color,
+                         "tipoVehiculo", "precioDiario", estado,
+                         "creadoEn", "actualizadoEn")
+                    VALUES
+                        (:cliente_id, :patente, :marca, :modelo, :anio, :color,
+                         :tipo_vehiculo, :precio_diario, 'PENDIENTE',
+                         now(), now())
+                    RETURNING id, "clienteId", patente, marca, modelo, anio, color,
+                              "tipoVehiculo", "precioDiario", estado,
+                              "creadoEn", "actualizadoEn"
+                    """
+                ),
+                {
+                    "cliente_id": request.cliente_id,
+                    "patente": request.patente,
+                    "marca": request.marca,
+                    "modelo": request.modelo,
+                    "anio": request.anio,
+                    "color": request.color if request.HasField("color") else None,
+                    "tipo_vehiculo": pb.TipoVehiculo.Name(request.tipo_vehiculo),
+                    "precio_diario": request.precio_diario,
+                },
+            ).mappings().first()
+
+        _publicar_externo_registrado(ve["id"], ve["clienteId"], ve["patente"])
+        return _fila_externo_a_pb(ve)
+
 
 def main():
     engine = engine_desde_env()
@@ -385,6 +553,14 @@ def main():
         {
             contratos.VERIFICACION_RESULTADO: lambda payload, evento: (
                 _registrar_resultado_verificacion(engine, payload, evento)
+            )
+        },
+    )
+    broker.escuchar(
+        contratos.COLA_VEHICULOS_EXTERNOS_COMPLETADA,
+        {
+            contratos.EXTERNOS_VALIDACION_COMPLETADA: lambda payload, evento: (
+                _completar_validacion_externo(engine, payload, evento)
             )
         },
     )

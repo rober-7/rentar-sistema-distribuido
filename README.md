@@ -144,6 +144,23 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    Para ver los eventos en la consola de RabbitMQ, el flujo completo y cómo
    publicar eventos de prueba, ver [`eventos/README.md`](eventos/README.md).
 
+   ### Probar el alta de vehículos de propietarios externos (Hito 3 - P3)
+
+   Para probar el alta y el circuito asíncrono de un vehículo externo:
+
+   1. Ingresá al Frontend (http://localhost:5173/login) con el cliente demo (`mfernandez@gmail.com` / `ClienteRentar2026!`).
+   2. Hacé clic en **"Ofrecer mi Vehículo"** (en el Home o en la barra superior).
+   3. Completá el formulario (ej. Patente `AD777EX`, Toyota Corolla 2023, Sedán, $32.000) y hacé clic en **"Publicar Vehículo"**.
+   4. El sistema confirmará el registro en estado **"Pendiente de validación"** y publicará en RabbitMQ el evento `vehiculos.externos.registrados`.
+   5. Para simular la resolución exitosa de las validaciones policiales y de titularidad (emitidas por el correlador de P4), ejecutá:
+
+      ```bash
+      docker compose exec vehicle_service python -c "from eventos import broker; broker.publicar('vehiculos.externos.validacion.completada', {'vehiculoExternoId': 1})"
+      ```
+
+   6. Vehicle Service consumirá el evento, marcará la solicitud como `APROBADO` e ingresará el auto en la tabla `vehiculos` con estado `DISPONIBLE` y `verificacion = VALIDADO`.
+   7. Al entrar a **Consultar Disponibilidad** en el Frontend, el auto ya aparecerá listado y disponible para reservar.
+
 5. Para bajar todo: `Ctrl+C` en la terminal donde quedó corriendo, y después:
 
    ```bash
@@ -210,3 +227,80 @@ Estado por punto de la consigna:
 | Coordinación entre servicios | ✅ Implementada | Rental Service valida cliente y vehículo mediante gRPC antes de crear una reserva. El Gateway combina los filtros de Vehicle Service con la ocupación informada por Rental Service. |
 
 **Arquitectura actual:** el Gateway no accede a ninguna base de datos. Cada servicio Python posee una base PostgreSQL y credenciales independientes; las referencias entre dominios se guardan como identificadores y se validan mediante gRPC. Rental DB impide atómicamente reservas superpuestas con una restricción `EXCLUDE` de PostgreSQL.
+
+### Hito 3 — Procesamiento Asíncrono (RabbitMQ)
+
+#### Hito 3 - P3: Alta de Vehículos de Propietarios Externos
+
+Permite a los clientes registrados en la plataforma dar de alta sus propios vehículos para que sean incorporados al catálogo de alquiler de Rentar tras ser validados policial y legalmente de manera asíncrona.
+
+##### 1. Resumen de la Arquitectura y Componentes Desarrollados
+
+- **Frontend (React + Vite):**
+  - **Nueva vista [`PublicarVehiculo.jsx`](frontend/src/pages/PublicarVehiculo.jsx):** Ruta `/cliente/publicar-vehiculo` protegida para el rol `CLIENTE`.
+  - **Acceso integrado:** Nueva tarjeta destacada en el dashboard del cliente ([`HomeClientes.jsx`](frontend/src/pages/HomeClientes.jsx)) y botón de navegación en la barra superior ([`NavBarCliente.jsx`](frontend/src/components/NavBarCliente.jsx)).
+  - **Formulario de carga:** Permite ingresar Patente, Tipo de vehículo (`SEDAN`, `SUV`, `PICKUP`, `COUPE`, `HATCHBACK`), Marca, Modelo, Año, Color y Precio Diario.
+  - **Gestión de estados:** Bloqueo de controles y estado de carga (`loading`) durante la solicitud; alertas claras de confirmación indicando el estado **"Pendiente de validación"** y carteles de error ante respuestas fallidas.
+  - **Servicio:** Función `registrarVehiculoExterno(datos)` en [`vehiculos.service.js`](frontend/src/services/vehiculos.service.js) que se comunica con el Gateway enviando el JWT correspondiente.
+
+- **API Gateway (NestJS):**
+  - **Controlador [`VehiculosExternosController`](backend/src/vehiculos/vehiculos-externos.controller.ts):** Expone el endpoint `POST /vehiculos/externos`.
+  - **Seguridad perimetral:** Protegido con `@UseGuards(JwtAuthGuard, RolesGuard)` y rol exigido `@Roles(RolUsuario.CLIENTE)`.
+  - **Inyección segura de identidad:** El ID del cliente no se toma del body del request para prevenir suplantación de identidad (spoofing); se inyecta de forma garantizada desde el payload del JWT firmado mediante `@CurrentUser() user: AuthenticatedUser`.
+  - **Validación DTO:** Implementada en [`CreateVehiculoExternoDto`](backend/src/vehiculos/dto/create-vehiculo-externo.dto.ts) y tipada en [`VehiculoExternoResponseDto`](backend/src/vehiculos/dto/vehiculo-externo-response.dto.ts) con decoradores de `class-validator` y `class-transformer`.
+  - **Cliente gRPC:** Tipado en [`vehiculo-grpc.interface.ts`](backend/src/vehiculos/grpc/vehiculo-grpc.interface.ts) y consumido vía `lastValueFrom()`, mapeando el estado de gRPC `ALREADY_EXISTS` a una excepción HTTP 409 Conflict.
+
+- **Vehicle Service (Python + gRPC + SQLAlchemy):**
+  - **Tabla `vehiculos_externos` en `vehicle_db`:** Modelo persistente que almacena la solicitud con campos `id`, `clienteId`, `patente`, `marca`, `modelo`, `anio`, `color`, `tipoVehiculo`, `precioDiario`, `estado` (iniciado en `'PENDIENTE'`), `creadoEn` y `actualizadoEn`.
+  - **Método gRPC `RegistrarVehiculoExterno`:** Valida que la patente no esté dada de alta en `vehiculos` ni exista ya una solicitud en trámite (`'PENDIENTE'` o `'APROBADO'`) en `vehiculos_externos`. Inserta el registro y, tras el commit, dispara el evento hacia RabbitMQ.
+  - **Publicación asíncrona:** Publica en RabbitMQ (`rentar.eventos`) el evento `vehiculos.externos.registrados`.
+  - **Consumidor asíncrono (`vehiculos.externos-completada`):** Consume en segundo plano el evento `vehiculos.externos.validacion.completada` emitido por el correlador de P4. Al recibirlo, promueve atómicamente la solicitud a estado `'APROBADO'` e inserta el vehículo en la tabla `vehiculos` con `estado = 'DISPONIBLE'`, `verificacion = 'VALIDADO'` y `activo = true` (utilizando `ON CONFLICT (patente) DO NOTHING` para garantizar idempotencia ante reentregas de mensajes).
+
+##### 2. Contratos de Eventos RabbitMQ Asociados
+
+* **Evento Producido por P3 (Consumido por P4 / Registros Service):**
+  * **Nombre / Routing Key:** `vehiculos.externos.registrados`
+  * **Destinos (Colas):** `registros.externos-patente` y `registros.externos-titularidad`.
+  * **Payload:**
+    ```json
+    {
+      "vehiculoExternoId": 1,
+      "clienteId": 2,
+      "patente": "AD777EX"
+    }
+    ```
+
+* **Evento Consumido por P3 (Producido por el Correlador de P4):**
+  * **Nombre / Routing Key:** `vehiculos.externos.validacion.completada`
+  * **Cola:** `vehiculos.externos-completada`
+  * **Payload desde la terminal:** docker compose exec vehicle_service python -c "from eventos import broker; broker.publicar('vehiculos.externos.validacion.completada', {'vehiculoExternoId': 1})"
+    
+
+##### 3. Guía de Pruebas y Comandos de Verificación
+
+1. **Alta desde el Frontend:**
+   - Iniciar sesión en http://localhost:5173/login con el usuario cliente demo (`mfernandez@gmail.com` / `ClienteRentar2026!`).
+   - Ir a **"Ofrecer mi Vehículo"** (`/cliente/publicar-vehiculo`), completar los campos y publicar.
+   - Verificar la alerta verde confirmando el registro en estado **"Pendiente de validación"**.
+
+2. **Simular Aprobación desde la Terminal (Evento del correlador de P4):**
+   - Publicar el evento de validación completada utilizando el cliente broker de Python:
+     ```bash
+     docker compose exec vehicle_service python -c "from eventos import broker; broker.publicar('vehiculos.externos.validacion.completada', {'vehiculoExternoId': 1})"
+     ```
+
+3. **Verificación en la Base de Datos (`vehicle_db`):**
+   - Ejecutar consultas vía `psql` directo en el contenedor para corroborar ambas tablas con el usuario `vehicle`:
+     ```bash
+     # 1. Verificar que la solicitud en vehiculos_externos pasó a estado APROBADO:
+     docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, \"clienteId\", patente, marca, modelo, estado, \"actualizadoEn\" FROM vehiculos_externos WHERE id = 1;"
+
+     # 2. Verificar que el vehículo fue insertado en vehiculos con estado DISPONIBLE y verificacion VALIDADO:
+     docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, patente, marca, modelo, \"tipoVehiculo\", \"precioDiario\", estado, verificacion, activo FROM vehiculos WHERE patente = 'AD777EX';"
+     ```
+   - O bien corroborar desde Adminer en http://localhost:8080 (Servidor: `vehicle_db`, Usuario: `vehicle`, Contraseña: `vehicle`, Base: `vehicle_db`).
+
+##### 4. Nota de Diseño / Consideración Técnica
+
+- **Integración transparente en el catálogo:** Una vez que la validación se completa y el vehículo es promovido a la tabla `vehiculos` con estado `DISPONIBLE`, se acopla inmediatamente al flujo general de Rentar: es retornado por el API Gateway en las consultas de disponibilidad y queda listo para ser reservado por cualquier usuario.
+- **Mejora futura:** Actualmente el modelo operativo permite que cualquier cliente reserve el vehículo una vez disponible. Se plantea como mejora futura incorporar una regla de negocio en el Gateway o Rental Service para restringir que el mismo cliente titular que dio de alta el vehículo externo pueda reservarlo.

@@ -18,3 +18,20 @@ CREATE TABLE IF NOT EXISTS vehiculos (
     "creadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "actualizadoEn" TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS vehiculos_externos (
+    id SERIAL PRIMARY KEY,
+    "clienteId" INTEGER NOT NULL,
+    patente VARCHAR NOT NULL,
+    marca VARCHAR NOT NULL,
+    modelo VARCHAR NOT NULL,
+    anio INTEGER NOT NULL,
+    color VARCHAR,
+    "tipoVehiculo" VARCHAR NOT NULL
+        CHECK ("tipoVehiculo" IN ('SEDAN', 'SUV', 'PICKUP', 'COUPE', 'HATCHBACK')),
+    "precioDiario" NUMERIC(10, 2) NOT NULL CHECK ("precioDiario" > 0),
+    estado VARCHAR NOT NULL DEFAULT 'PENDIENTE'
+        CHECK (estado IN ('PENDIENTE', 'APROBADO', 'RECHAZADO')),
+    "creadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "actualizadoEn" TIMESTAMPTZ NOT NULL DEFAULT now()
+);

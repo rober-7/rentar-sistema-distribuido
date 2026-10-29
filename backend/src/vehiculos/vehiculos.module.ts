@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule } from '@nestjs/microservices';
 import { VehiculosController } from './vehiculos.controller';
+import { VehiculosExternosController } from './vehiculos-externos.controller';
 import { vehiculoGrpcClientOptions } from './vehiculos.grpc-client';
 import { rentalGrpcClientOptions } from '../reservas/rental.grpc-client';
 
@@ -11,6 +12,6 @@ import { rentalGrpcClientOptions } from '../reservas/rental.grpc-client';
       rentalGrpcClientOptions(),
     ]),
   ],
-  controllers: [VehiculosController],
+  controllers: [VehiculosExternosController, VehiculosController],
 })
 export class VehiculosModule {}
