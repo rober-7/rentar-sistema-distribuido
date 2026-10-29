@@ -148,7 +148,17 @@ cualquier otra da `VALIDADO`. La consulta tiene una demora simulada de 3 s
 ```
 
 La respuesta gRPC de `CrearReserva` **no** espera el mantenimiento: publica el
-evento y responde.
+evento y responde. Mantenimiento Service registra la solicitud con `reservaId`
+único, simula el procesamiento durante dos segundos y guarda el resultado antes
+de publicar `mantenimiento.resultado`. El resultado predeterminado es
+`REALIZADO`; se puede configurar `RESULTADO_MANTENIMIENTO=NO_REALIZADO` para
+probar el otro resultado. `DEMORA_MANTENIMIENTO_SEGUNDOS` permite ajustar la
+demora y debe ser menor a 60 segundos para no perder la conexión con RabbitMQ.
+
+El procesamiento es idempotente: un evento duplicado no crea otra solicitud.
+Si el resultado ya se guardó pero falló su publicación, al volver a publicar
+`reserva.confirmada` se reutiliza el resultado persistido y se publica de nuevo.
+El consumidor de Rental Service actualiza la reserva correspondiente.
 
 ## Cómo usarlo en un servicio
 

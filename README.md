@@ -9,6 +9,7 @@ Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo 
 - **Customer Service:** Python + grpcio + SQLAlchemy — `services/customer-service/`
 - **Rental Service:** Python + grpcio + SQLAlchemy — `services/rental-service/`
 - **Registros Service:** Python + pika + SQLAlchemy — `services/registros-service/` (registros externos simulados, solo eventos)
+- **Mantenimiento Service:** Python + pika + SQLAlchemy — `services/mantenimiento-service/` (solicitudes de mantenimiento por eventos)
 - **Comunicación Gateway ↔ servicios internos:** gRPC (contratos en `proto/`)
 - **Comunicación asíncrona entre servicios:** RabbitMQ (contratos en `eventos/`)
 - **Frontend:** React + Vite
@@ -65,11 +66,13 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    docker compose up --build
    ```
 
-   Esto levanta cuatro bases PostgreSQL independientes, RabbitMQ, Adminer, los tres servicios gRPC (Python), Registros Service, el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
+   Esto levanta cinco bases PostgreSQL independientes, RabbitMQ, Adminer, los tres servicios gRPC (Python), Registros Service, Mantenimiento Service, el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
 
    > **Si ya tenías el proyecto levantado de antes del Hito 3**, cambió el
-   > esquema de `vehicle_db` y hay bases nuevas. Regenerá todo una vez con
-   > `docker compose down -v` y después `docker compose up --build`.
+   > esquema de `vehicle_db` y hay bases nuevas. Rental Service agrega la
+   > columna de resultado de mantenimiento al iniciar; para regenerar las
+   > bases nuevas desde cero usá `docker compose down -v` y después
+   > `docker compose up --build`. Esto borra los datos persistidos.
 
 4. Cuando termine de levantar, vas a tener disponible:
 
@@ -85,6 +88,7 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    | Vehicle DB  | localhost:5433             | PostgreSQL exclusivo de Vehicle Service |
    | Rental DB   | localhost:5434             | PostgreSQL exclusivo de Rental Service |
    | Registros DB | localhost:5435            | PostgreSQL exclusivo de Registros Service |
+   | Mantenimiento DB | localhost:5436       | PostgreSQL exclusivo de Mantenimiento Service |
 
    Para entrar a **Adminer**, elegí la base que quieras inspeccionar:
 
@@ -94,6 +98,7 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    | Vehículos | `vehicle_db` | `vehicle` | `vehicle` | `vehicle_db` |
    | Reservas | `rental_db` | `rental` | `rental` | `rental_db` |
    | Registros externos | `registros_db` | `registros` | `registros` | `registros_db` |
+   | Mantenimiento | `mantenimiento_db` | `mantenimiento` | `mantenimiento` | `mantenimiento_db` |
 
 
    ### Acceso inicial
