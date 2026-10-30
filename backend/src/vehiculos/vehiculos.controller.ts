@@ -41,6 +41,8 @@ import {
   isGrpcServiceError,
 } from '../common/grpc/grpc-error';
 import { VerificacionVehiculo } from './enums/verificacion-vehiculo.enum';
+import { toProtoEnum } from '../common/grpc/proto-enum';
+import { fromVehiculoProto } from './grpc/vehiculo-grpc.mapper';
 
 /**
  * Vehicle Service omite `verificacion` mientras la verificación policial
@@ -114,11 +116,16 @@ export class VehiculosController implements OnModuleInit {
     @Body() createVehiculoDto: CreateVehiculoDto,
   ): Promise<VehiculoGrpc> {
     try {
-      return conVerificacion(
-        await firstValueFrom(
-          this.vehiculoGrpcService.crearVehiculo(createVehiculoDto),
-        ),
+      const { vehiculo } = await firstValueFrom(
+        this.vehiculoGrpcService.crearVehiculo({
+          ...createVehiculoDto,
+          tipoVehiculo: toProtoEnum(
+            'TIPO_VEHICULO',
+            createVehiculoDto.tipoVehiculo,
+          ),
+        }),
       );
+      return conVerificacion(fromVehiculoProto(vehiculo));
     } catch (error) {
       if (
         isGrpcServiceError(error) &&
@@ -146,7 +153,7 @@ export class VehiculosController implements OnModuleInit {
       const { vehiculos } = await firstValueFrom(
         this.vehiculoGrpcService.listarVehiculos({}),
       );
-      return this.completarEstados(vehiculos);
+      return this.completarEstados(vehiculos.map(fromVehiculoProto));
     } catch (error) {
       this.lanzarErrorGrpc(error, 'ListarVehiculos');
     }
@@ -169,10 +176,10 @@ export class VehiculosController implements OnModuleInit {
   @ApiResponse({ status: 404, description: 'No existe un vehículo con ese id' })
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<VehiculoGrpc> {
     try {
-      const vehiculo = await firstValueFrom(
+      const { vehiculo } = await firstValueFrom(
         this.vehiculoGrpcService.obtenerVehiculo({ id }),
       );
-      return (await this.completarEstados([vehiculo]))[0];
+      return (await this.completarEstados([fromVehiculoProto(vehiculo)]))[0];
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
@@ -237,14 +244,16 @@ export class VehiculosController implements OnModuleInit {
     const request = {
       id,
       ...resto,
+      ...(resto.tipoVehiculo !== undefined && {
+        tipoVehiculo: toProtoEnum('TIPO_VEHICULO', resto.tipoVehiculo),
+      }),
       ...(color !== undefined ? { color: color ?? '' } : {}),
     };
     try {
-      return conVerificacion(
-        await firstValueFrom(
-          this.vehiculoGrpcService.actualizarVehiculo(request),
-        ),
+      const { vehiculo } = await firstValueFrom(
+        this.vehiculoGrpcService.actualizarVehiculo(request),
       );
+      return conVerificacion(fromVehiculoProto(vehiculo));
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);

@@ -150,7 +150,9 @@ def _fila_a_pb(reserva) -> pb.Reserva:
     respuesta.fecha_inicio = reserva["fecha_inicio"].isoformat()
     respuesta.fecha_finalizacion = reserva["fecha_finalizacion"].isoformat()
     respuesta.importe_total = float(reserva["importe_total"])
-    respuesta.estado = pb.EstadoReserva.Value(reserva["estado"])
+    respuesta.estado = pb.EstadoReserva.Value(
+        f"ESTADO_RESERVA_{reserva['estado']}"
+    )
     respuesta.activo = reserva["activo"]
     return respuesta
 
@@ -210,13 +212,14 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 clientes_pb2.VerificarActivoRequest(id=request.cliente_id),
                 timeout=5,
             )
-            vehiculo = self.vehicle_client.ObtenerVehiculo(
+            vehiculo_response = self.vehicle_client.ObtenerVehiculo(
                 vehiculos_pb2.ObtenerVehiculoRequest(id=request.vehiculo_id),
                 timeout=5,
             )
         except grpc.RpcError as error:
             self._reenviar_error_grpc(error, context, "servicio de dominio")
 
+        vehiculo = vehiculo_response.vehiculo
         if not cliente.activo:
             context.abort(
                 grpc.StatusCode.NOT_FOUND,
@@ -229,7 +232,8 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             )
         if (
             vehiculo.HasField("verificacion")
-            and vehiculo.verificacion == vehiculos_pb2.ROBADO
+            and vehiculo.verificacion
+            == vehiculos_pb2.RESULTADO_VERIFICACION_ROBADO
         ):
             context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
@@ -279,7 +283,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 )
             raise
         _publicar_reserva_confirmada(reserva)
-        return _fila_a_pb(reserva)
+        return pb.CrearReservaResponse(reserva=_fila_a_pb(reserva))
 
     def ListarReservas(self, request, context):
         print("[gRPC] ListarReservas invocado por el Gateway", flush=True)
@@ -289,8 +293,10 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             condiciones.append("cliente_id = :cliente_id")
             parametros["cliente_id"] = request.cliente_id
         if request.HasField("estado"):
-            estado = pb.EstadoReserva.Name(request.estado)
-            if estado != "ESTADO_RESERVA_UNSPECIFIED":
+            estado = pb.EstadoReserva.Name(request.estado).removeprefix(
+                "ESTADO_RESERVA_"
+            )
+            if estado != "UNSPECIFIED":
                 condiciones.append("estado = :estado")
                 parametros["estado"] = estado
 
@@ -354,7 +360,9 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 ),
                 {"id": request.id},
             ).mappings().one()
-        return _fila_a_pb(reserva_actualizada)
+        return pb.CancelarReservaResponse(
+            reserva=_fila_a_pb(reserva_actualizada)
+        )
 
     def ListarHistorial(self, request, context):
         print("[gRPC] ListarHistorial invocado por el Gateway", flush=True)

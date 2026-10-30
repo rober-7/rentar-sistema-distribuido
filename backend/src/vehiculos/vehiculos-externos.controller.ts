@@ -38,6 +38,8 @@ import {
   grpcErrorMessage,
   isGrpcServiceError,
 } from '../common/grpc/grpc-error';
+import { toProtoEnum } from '../common/grpc/proto-enum';
+import { fromVehiculoExternoProto } from './grpc/vehiculo-grpc.mapper';
 
 /**
  * Vehicle Service omite cada validación mientras su resultado no llegó por
@@ -93,7 +95,8 @@ export class VehiculosExternosController implements OnModuleInit {
   })
   @ApiResponse({
     status: 201,
-    description: 'Solicitud de vehículo externo registrada con estado PENDIENTE',
+    description:
+      'Solicitud de vehículo externo registrada con estado PENDIENTE',
     type: VehiculoExternoResponseDto,
   })
   @ApiResponse({
@@ -110,13 +113,14 @@ export class VehiculosExternosController implements OnModuleInit {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<VehiculoExternoGrpc> {
     try {
-      const externo = await lastValueFrom(
+      const { vehiculo } = await lastValueFrom(
         this.vehiculoGrpcService.registrarVehiculoExterno({
           ...createDto,
           clienteId: user.id,
+          tipoVehiculo: toProtoEnum('TIPO_VEHICULO', createDto.tipoVehiculo),
         }),
       );
-      return conValidaciones(externo);
+      return conValidaciones(fromVehiculoExternoProto(vehiculo));
     } catch (error) {
       if (
         isGrpcServiceError(error) &&
@@ -155,7 +159,9 @@ export class VehiculosExternosController implements OnModuleInit {
           clienteId: user.id,
         }),
       );
-      return (vehiculos ?? []).map(conValidaciones);
+      return (vehiculos ?? [])
+        .map(fromVehiculoExternoProto)
+        .map(conValidaciones);
     } catch (error) {
       throw new InternalServerErrorException(
         'Vehicle Service no pudo completar ListarVehiculosExternos: ' +

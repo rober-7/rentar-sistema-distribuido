@@ -81,9 +81,10 @@ export class ClientesController implements OnModuleInit {
     @Body() createClienteDto: CreateClienteDto,
   ): Promise<ClienteGrpc> {
     try {
-      return await firstValueFrom(
+      const { cliente } = await firstValueFrom(
         this.clienteGrpcService.crearCliente(createClienteDto),
       );
+      return cliente;
     } catch (error) {
       if (
         isGrpcServiceError(error) &&
@@ -131,9 +132,10 @@ export class ClientesController implements OnModuleInit {
   @ApiResponse({ status: 404, description: 'No existe un cliente con ese id' })
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<ClienteGrpc> {
     try {
-      return await firstValueFrom(
+      const { cliente } = await firstValueFrom(
         this.clienteGrpcService.obtenerCliente({ id }),
       );
+      return cliente;
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un cliente con id ${id}`);
@@ -165,9 +167,10 @@ export class ClientesController implements OnModuleInit {
     @Body() updateClienteDto: UpdateClienteDto,
   ): Promise<ClienteGrpc> {
     try {
-      return await firstValueFrom(
+      const { cliente } = await firstValueFrom(
         this.clienteGrpcService.actualizarCliente({ id, ...updateClienteDto }),
       );
+      return cliente;
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un cliente con id ${id}`);
@@ -195,9 +198,10 @@ export class ClientesController implements OnModuleInit {
   async remove(@Param('id', ParseIntPipe) id: number): Promise<ClienteGrpc> {
     try {
       // Usamos el método específico que definimos en tu Python para eliminar
-      return await firstValueFrom(
+      const { cliente } = await firstValueFrom(
         this.clienteGrpcService.eliminarCliente({ id }),
       );
+      return cliente;
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un cliente con id ${id}`);

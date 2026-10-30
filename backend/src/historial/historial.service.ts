@@ -13,6 +13,7 @@ import { VehiculoServiceGrpcClient } from '../vehiculos/grpc/vehiculo-grpc.inter
 import { calcularDias } from '../common/utils/calcular-importe';
 import { HistorialAlquiler } from './dto/historial-alquiler.type';
 import { EstadoHistorialAlquiler } from './enums/estado-historial-alquiler.enum';
+import { fromReservaProto } from '../reservas/grpc/reserva-grpc.mapper';
 
 @Injectable()
 export class HistorialService implements OnModuleInit {
@@ -37,7 +38,7 @@ export class HistorialService implements OnModuleInit {
     const response = await firstValueFrom(
       this.reservasGrpc.listarHistorial({ clienteId }),
     );
-    const reservas = response.reservas ?? [];
+    const reservas = (response.reservas ?? []).map(fromReservaProto);
     if (reservas.length === 0) return [];
 
     const responseVehiculos = await firstValueFrom(
