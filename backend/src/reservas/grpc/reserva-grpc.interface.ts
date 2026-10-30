@@ -18,7 +18,7 @@ export interface ReservaServiceGrpcClient {
     fechaInicio: string;
     fechaFinalizacion: string;
   }): Observable<ReservaGrpc>;
-  consultarReservas(data: {
+  listarReservas(data: {
     clienteId?: number;
     estado?: string;
   }): Observable<{ reservas: ReservaGrpc[] }>;
@@ -26,14 +26,14 @@ export interface ReservaServiceGrpcClient {
     id: number;
     clienteId: number;
   }): Observable<ReservaGrpc>;
-  consultarHistorial(data: {
+  listarHistorial(data: {
     clienteId?: number;
   }): Observable<{ reservas: ReservaGrpc[] }>;
-  consultarVehiculosOcupados(data: {
+  listarVehiculosOcupados(data: {
     fechaInicio: string;
     fechaFinalizacion: string;
   }): Observable<{ vehiculoIds: number[] }>;
-  consultarEstadosVehiculos(data: { vehiculoIds: number[] }): Observable<{
+  listarEstadosVehiculos(data: { vehiculoIds: number[] }): Observable<{
     estados: Array<{ vehiculoId: number; estado: string }>;
   }>;
 }

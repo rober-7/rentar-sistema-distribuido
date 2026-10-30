@@ -5,18 +5,57 @@ package vehiculos;
 // Vehicle Service - gestiona el dominio de vehículos (Hito 2).
 // Todas las operaciones están implementadas: el Gateway no accede directo a
 // la base de datos de este dominio, todo pasa por acá.
+// ========================================================================
+// SERVICIO: VehiculoService
+// Finalidad: Vehicle Service. Gestiona el catálogo de vehículos 
+// propios y externos. Mantiene la fuente de la verdad sobre los atributos 
+// del vehículo y su habilitación legal (verificación asíncrona), pero NO 
+// maneja su disponibilidad temporal (esto pertenece al Rental Service).
+// ========================================================================
 service VehiculoService {
-  rpc ListarVehiculos(ListarVehiculosRequest) returns (ListarVehiculosResponse);
-  rpc ObtenerVehiculo(ObtenerVehiculoRequest) returns (Vehiculo);
-  // Filtra exclusivamente datos propios del dominio Vehículos. La
-  // disponibilidad temporal se resuelve con Rental Service.
-  rpc FiltrarVehiculos(FiltrarVehiculosRequest) returns (ListarVehiculosResponse);
-  rpc ActualizarEstado(ActualizarEstadoRequest) returns (Vehiculo);
+  // Da de alta un nuevo vehículo en la flota.
+  // Requiere: Datos del vehículo (patente única, marca, modelo, precio, etc.).
+  // Devuelve: El vehículo creado (estado inicial DISPONIBLE) y dispara 
+  // asíncronamente el evento de verificación policial por RabbitMQ.
   rpc CrearVehiculo(CrearVehiculoRequest) returns (Vehiculo);
+  
+  // Modifica parcialmente los datos de un vehículo existente.
+  // Requiere: El ID y los campos específicos a actualizar.
+  // Devuelve: El vehículo modificado.
+  // Nota: La patente es inmutable. Mandar activo = false equivale a baja lógica.
   rpc ActualizarVehiculo(ActualizarVehiculoRequest) returns (Vehiculo);
+
+  // Modifica el estado operativo de un vehículo.
+  // Requiere: El ID del vehículo y el nuevo EstadoVehiculo.
+  // Devuelve: El vehículo actualizado.
+  // Nota: Pensado para ser consumido internamente por el Rental Service 
+  // al crear o cancelar reservas.
+  rpc ActualizarEstado(ActualizarEstadoRequest) returns (Vehiculo);
+
+  // Consulta los datos detallados de un vehículo por su identificador.
+  // Requiere: El ID del vehículo.
+  // Devuelve: El objeto Vehiculo. Lanza NOT_FOUND si no existe.
+  rpc ObtenerVehiculo(ObtenerVehiculoRequest) returns (Vehiculo);
+
+  // Lista todos los vehículos registrados en el catálogo.
+  // Requiere: Petición vacía.
+  // Devuelve: La colección completa de vehículos.
+  rpc ListarVehiculos(ListarVehiculosRequest) returns (ListarVehiculosResponse);
+ 
+  // Busca vehículos en base a sus características físicas o comerciales.
+  // Requiere: Filtros opcionales (marca, modelo, tipo, rango de precio).
+  // Devuelve: Lista de vehículos que coinciden (omitiendo los ROBADOS o inactivos).
+  // Nota: Filtra exclusivamente datos propios del dominio Vehículos. La
+  // disponibilidad temporal real se resuelve con Rental Service.
+  rpc FiltrarVehiculos(FiltrarVehiculosRequest) returns (ListarVehiculosResponse);
+  
+  // Inicia la solicitud para incorporar un vehículo de un tercero (cliente) a la plataforma.
+  // Requiere: ID del cliente (propietario) y datos del vehículo.
+  // Devuelve: El estado del trámite (PENDIENTE) y publica el evento para su validación asíncrona.
   rpc RegistrarVehiculoExterno(RegistrarVehiculoExternoRequest) returns (VehiculoExternoResponse);
 }
 
+// Categorías de carrocería permitidas por la plataforma.
 enum TipoVehiculo {
   TIPO_VEHICULO_UNSPECIFIED = 0;
   SEDAN = 1;
@@ -26,6 +65,7 @@ enum TipoVehiculo {
   HATCHBACK = 5;
 }
 
+// Estado operativo del vehículo dentro del ciclo de alquiler.
 enum EstadoVehiculo {
   ESTADO_VEHICULO_UNSPECIFIED = 0;
   DISPONIBLE = 1;
@@ -43,6 +83,7 @@ enum ResultadoVerificacion {
   ROBADO = 2;
 }
 
+// Estado del trámite de alta para vehículos de terceros.
 enum EstadoVehiculoExterno {
   ESTADO_VEHICULO_EXTERNO_UNSPECIFIED = 0;
   PENDIENTE = 1;
@@ -50,6 +91,7 @@ enum EstadoVehiculoExterno {
   RECHAZADO = 3;
 }
 
+// Representa la entidad principal Vehículo en el catálogo.
 message Vehiculo {
   int32 id = 1;
   string patente = 2;
@@ -61,34 +103,12 @@ message Vehiculo {
   double precio_diario = 8;
   EstadoVehiculo estado = 9;
   bool activo = 10;
-  string creado_en = 11;
-  string actualizado_en = 12;
+  string creado_en = 11; // Momento exacto de registro en el sistema. Formato esperado: YYYY-MM-DDTHH:mm:ssZ, ej: "1999-01-01T10:00:00Z"
+  string actualizado_en = 12; // Momento exacto de la última modificación en el sistema. Formato esperado: YYYY-MM-DDTHH:mm:ssZ, ej: "1999-01-01T10:00:00Z"
   optional ResultadoVerificacion verificacion = 13;
 }
 
-message ListarVehiculosRequest {}
-
-message ListarVehiculosResponse {
-  repeated Vehiculo vehiculos = 1;
-}
-
-message ObtenerVehiculoRequest {
-  int32 id = 1;
-}
-
-message FiltrarVehiculosRequest {
-  optional TipoVehiculo tipo_vehiculo = 1;
-  optional string marca = 2;
-  optional string modelo = 3;
-  optional double precio_minimo = 4;
-  optional double precio_maximo = 5;
-}
-
-message ActualizarEstadoRequest {
-  int32 id = 1;
-  EstadoVehiculo estado = 2;
-}
-
+// Estructura de datos requerida para dar de alta un vehículo.
 message CrearVehiculoRequest {
   string patente = 1;
   string marca = 2;
@@ -113,6 +133,34 @@ message ActualizarVehiculoRequest {
   optional bool activo = 8;
 }
 
+// Solicitud interna para forzar un cambio de estado operativo.
+message ActualizarEstadoRequest {
+  int32 id = 1;
+  EstadoVehiculo estado = 2;
+}
+
+// Solicitud para consultar un vehículo puntual por su identificador.
+message ObtenerVehiculoRequest {
+  int32 id = 1;
+}
+
+// Solicitud sin parámetros para listar todo el catálogo.
+message ListarVehiculosRequest {}
+// Respuesta que contiene la colección de vehículos solicitados.
+message ListarVehiculosResponse {
+  repeated Vehiculo vehiculos = 1;
+}
+
+// Criterios de búsqueda para filtrar el catálogo.
+message FiltrarVehiculosRequest {
+  optional TipoVehiculo tipo_vehiculo = 1;
+  optional string marca = 2;
+  optional string modelo = 3;
+  optional double precio_minimo = 4;
+  optional double precio_maximo = 5;
+}
+
+// Estructura de datos requerida para solicitar el registro de un vehículo de terceros.
 message RegistrarVehiculoExternoRequest {
   int32 cliente_id = 1;
   string patente = 2;
@@ -123,7 +171,7 @@ message RegistrarVehiculoExternoRequest {
   TipoVehiculo tipo_vehiculo = 7;
   double precio_diario = 8;
 }
-
+// Respuesta que representa el comprobante del trámite de un vehículo externo.
 message VehiculoExternoResponse {
   int32 id = 1;
   int32 cliente_id = 2;

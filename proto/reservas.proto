@@ -2,17 +2,47 @@ syntax = "proto3";
 
 package reservas;
 
-// Rental Service - gestiona el dominio de reservas y alquileres (Hito 2).
+// Rental Service - gestiona el dominio de reservas y alquileres.
+// ========================================================================
+// SERVICIO: ReservaService
+// Finalidad: Rental Service. Gestiona el dominio de alquileres y 
+// su historial. Valida disponibilidad y reglas de negocio comunicándose 
+// internamente con Customer Service y Vehicle Service vía gRPC.
+// ========================================================================
 
 service ReservaService {
+  // Registra un nuevo alquiler en el sistema y emite un evento de confirmación.
+  // Requiere: IDs válidos de cliente y vehículo, y un rango de fechas futuras.
+  // Devuelve: La reserva creada con el importe total calculado y estado inicial.
   rpc CrearReserva(CrearReservaRequest) returns (Reserva);
-  rpc ConsultarReservas(ConsultarReservasRequest) returns (ConsultarReservasResponse);
+  
+  // Cancela una reserva antes de que el alquiler comience.
+  // Requiere: El ID de la reserva y el ID del cliente (por seguridad).
+  // Devuelve: La reserva actualizada con estado CANCELADA.
   rpc CancelarReserva(CancelarReservaRequest) returns (Reserva);
-  rpc ConsultarHistorial(ConsultarHistorialRequest) returns (ConsultarHistorialResponse);
-  rpc ConsultarVehiculosOcupados(ConsultarVehiculosOcupadosRequest) returns (ConsultarVehiculosOcupadosResponse);
-  rpc ConsultarEstadosVehiculos(ConsultarEstadosVehiculosRequest) returns (ConsultarEstadosVehiculosResponse);
+  
+  // Lista las reservas activas en el sistema.
+  // Requiere: Filtros opcionales por cliente o por estado.
+  // Devuelve: Lista de reservas ordenadas por fecha de inicio descendente.
+  rpc ListarReservas(ListarReservasRequest) returns (ListarReservasResponse);
+
+  // Lista las reservas pasadas de un cliente.
+  // Requiere: Filtro opcional por cliente.
+  // Devuelve: Lista de reservas cuyo estado es CANCELADA o FINALIZADA.
+  rpc ListarHistorial(ListarHistorialRequest) returns (ListarHistorialResponse);
+  
+  // Identifica qué vehículos están ocupados en un rango de fechas.
+  // Requiere: Fecha de inicio y fin a consultar.
+  // Devuelve: Lista de IDs de vehículos que tienen al menos una reserva confirmada en ese lapso.
+  rpc ListarVehiculosOcupados(ListarVehiculosOcupadosRequest) returns (ListarVehiculosOcupadosResponse);
+  
+  // Calcula el estado operativo en tiempo real de una lista de vehículos.
+  // Requiere: Una lista de IDs de vehículos.
+  // Devuelve: El estado actual (DISPONIBLE, RESERVADO, EN_ALQUILER) cruzando la hora actual con las reservas.
+  rpc ListarEstadosVehiculos(ListarEstadosVehiculosRequest) returns (ListarEstadosVehiculosResponse);
 }
 
+// Estados posibles en el ciclo de vida de una reserva.
 enum EstadoReserva {
   ESTADO_RESERVA_UNSPECIFIED = 0;
   CONFIRMADA = 1;
@@ -20,17 +50,19 @@ enum EstadoReserva {
   FINALIZADA = 3;
 }
 
+// Representa la entidad principal de una Reserva en el sistema.
 message Reserva {
   int32 id = 1;
   int32 vehiculo_id = 2;
   int32 cliente_id = 3;
-  string fecha_inicio = 4;
-  string fecha_finalizacion = 5;
+  string fecha_inicio = 4; // Momento exacto de inicio del alquiler. Formato esperado: YYYY-MM-DDTHH:mm:ssZ, ej: "1999-01-01T10:00:00Z"
+  string fecha_finalizacion = 5; // Momento exacto de finalización del alquiler. Formato esperado: YYYY-MM-DDTHH:mm:ssZ, ej: "1999-01-01T10:00:00Z"
   double importe_total = 6;
   EstadoReserva estado = 7;
   bool activo = 8;
 }
 
+// Estructura de datos requerida para dar de alta una reserva.
 message CrearReservaRequest {
   int32 vehiculo_id = 1;
   int32 cliente_id = 2;
@@ -38,46 +70,51 @@ message CrearReservaRequest {
   string fecha_finalizacion = 4;
 }
 
-message ConsultarReservasRequest {
-  optional int32 cliente_id = 1;
-  optional EstadoReserva estado = 2;
-}
-
-message ConsultarReservasResponse {
-  repeated Reserva reservas = 1;
-}
-
+// Solicitud para cancelar una reserva existente.
 message CancelarReservaRequest {
   int32 id = 1;
   int32 cliente_id = 2;
 }
 
-message ConsultarHistorialRequest {
+// Solicitud para buscar reservas mediante filtros.
+message ListarReservasRequest {
   optional int32 cliente_id = 1;
+  optional EstadoReserva estado = 2;
 }
-
-message ConsultarHistorialResponse {
+// Respuesta que contiene la colección de reservas solicitadas.
+message ListarReservasResponse {
   repeated Reserva reservas = 1;
 }
 
-message ConsultarVehiculosOcupadosRequest {
+// Solicitud para consultar el historial (reservas finalizadas o canceladas).
+message ListarHistorialRequest {
+  optional int32 cliente_id = 1;
+}
+// Respuesta que contiene el historial de reservas.
+message ListarHistorialResponse {
+  repeated Reserva reservas = 1;
+}
+
+// Solicitud para consultar solapamiento de fechas.
+message ListarVehiculosOcupadosRequest {
   string fecha_inicio = 1;
   string fecha_finalizacion = 2;
 }
-
-message ConsultarVehiculosOcupadosResponse {
+// Respuesta con los IDs de los vehículos no disponibles en el rango.
+message ListarVehiculosOcupadosResponse {
   repeated int32 vehiculo_ids = 1;
 }
 
-message ConsultarEstadosVehiculosRequest {
+// Solicitud para conocer el estado operativo de los vehículos en tiempo real.
+message ListarEstadosVehiculosRequest {
   repeated int32 vehiculo_ids = 1;
 }
-
+// Respuesta que contiene los estados computados de los vehículos consultados.
+message ListarEstadosVehiculosResponse {
+  repeated EstadoVehiculoReserva estados = 1;
+}
+// Representa la respuesta de estado para un vehículo específico.
 message EstadoVehiculoReserva {
   int32 vehiculo_id = 1;
   string estado = 2;
-}
-
-message ConsultarEstadosVehiculosResponse {
-  repeated EstadoVehiculoReserva estados = 1;
 }

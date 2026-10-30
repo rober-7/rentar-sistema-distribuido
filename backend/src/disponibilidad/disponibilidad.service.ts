@@ -63,7 +63,7 @@ export class DisponibilidadService implements OnModuleInit {
         }),
       ),
       firstValueFrom(
-        this.reservaGrpcService.consultarVehiculosOcupados({
+        this.reservaGrpcService.listarVehiculosOcupados({
           fechaInicio: filtro.fechaInicio.toISOString(),
           fechaFinalizacion: filtro.fechaFin.toISOString(),
         }),

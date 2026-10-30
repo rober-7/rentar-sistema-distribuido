@@ -271,7 +271,7 @@ export class VehiculosController implements OnModuleInit {
   ): Promise<VehiculoGrpc[]> {
     if (vehiculos.length === 0) return vehiculos;
     const { estados } = await firstValueFrom(
-      this.reservaGrpcService.consultarEstadosVehiculos({
+      this.reservaGrpcService.listarEstadosVehiculos({
         vehiculoIds: vehiculos.map((vehiculo) => vehiculo.id),
       }),
     );
