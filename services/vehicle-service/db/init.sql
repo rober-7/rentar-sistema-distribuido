@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS vehiculos_externos (
     "precioDiario" NUMERIC(10, 2) NOT NULL CHECK ("precioDiario" > 0),
     estado VARCHAR NOT NULL DEFAULT 'PENDIENTE'
         CHECK (estado IN ('PENDIENTE', 'APROBADO', 'RECHAZADO')),
+    -- Resultado de cada validación asíncrona; NULL mientras no llegó. El
+    -- correlador los junta por id para decidir si la incorporación sigue.
+    "validacionPatente" VARCHAR
+        CHECK ("validacionPatente" IN ('VALIDADO', 'RECHAZADO')),
+    "validacionTitularidad" VARCHAR
+        CHECK ("validacionTitularidad" IN ('VALIDADO', 'RECHAZADO')),
     "creadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "actualizadoEn" TIMESTAMPTZ NOT NULL DEFAULT now()
 );

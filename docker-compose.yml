@@ -223,14 +223,18 @@ services:
       RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
       SERVICIO: registros-service
       DEMORA_VERIFICACION_SEGUNDOS: 3
+      CUSTOMER_SERVICE_URL: customer_service:50052
     volumes:
       - ./services/registros-service:/app
+      - ./proto:/app/proto
       - ./eventos:/app/eventos
     depends_on:
       registros_db:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      customer_service:
+        condition: service_started
 
   mantenimiento_service:
     build:

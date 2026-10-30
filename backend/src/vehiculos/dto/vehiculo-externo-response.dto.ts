@@ -7,6 +7,13 @@ export enum EstadoVehiculoExterno {
   RECHAZADO = 'RECHAZADO',
 }
 
+// Resultado de cada validación asíncrona (patente y titularidad).
+export enum ResultadoValidacionExterno {
+  PENDIENTE = 'PENDIENTE',
+  VALIDADO = 'VALIDADO',
+  RECHAZADO = 'RECHAZADO',
+}
+
 export class VehiculoExternoResponseDto {
   @ApiProperty()
   id: number;
@@ -40,6 +47,18 @@ export class VehiculoExternoResponseDto {
     example: EstadoVehiculoExterno.PENDIENTE,
   })
   estado: EstadoVehiculoExterno;
+
+  @ApiProperty({
+    enum: ResultadoValidacionExterno,
+    description: 'Validación de patente contra el registro de robos',
+  })
+  validacionPatente: ResultadoValidacionExterno;
+
+  @ApiProperty({
+    enum: ResultadoValidacionExterno,
+    description: 'Validación de titularidad contra el registro automotor',
+  })
+  validacionTitularidad: ResultadoValidacionExterno;
 
   @ApiProperty({ format: 'date-time' })
   creadoEn: string;

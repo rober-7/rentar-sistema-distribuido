@@ -19,6 +19,13 @@ el resultado (vehiculos.verificacion.resultado) llega de forma asíncrona por
 RabbitMQ. La verificación se guarda en la columna "verificacion", separada del
 estado operativo; un vehículo ROBADO deja de ofrecerse en disponibilidad y
 Rental Service rechaza reservarlo.
+
+Vehículos de propietarios externos: RegistrarVehiculoExterno guarda la
+solicitud PENDIENTE y publica vehiculos.externos.registrados. Registros
+Service valida patente y titularidad por separado; el correlador de este
+servicio junta los dos resultados y, si ambos son VALIDADO, publica
+vehiculos.externos.validacion.completada, cuyo consumidor incorpora el
+vehículo como DISPONIBLE. Un RECHAZADO deja la solicitud RECHAZADO.
 """
 
 import os
@@ -67,6 +74,26 @@ def engine_desde_env():
     return create_engine(url, pool_pre_ping=True)
 
 
+def asegurar_esquema_externos(engine) -> None:
+    # init.sql solo corre con un volumen nuevo. Re-ejecutarlo (es idempotente)
+    # crea vehiculos_externos si falta, y el ALTER agrega las columnas del
+    # correlador a una tabla ya existente, sin tener que borrar la base.
+    init_sql = os.path.join(os.path.dirname(__file__), "db", "init.sql")
+    with engine.begin() as conn:
+        with open(init_sql, encoding="utf-8") as sql:
+            conn.exec_driver_sql(sql.read())
+        for columna in ("validacionPatente", "validacionTitularidad"):
+            conn.execute(
+                text(
+                    f"""
+                    ALTER TABLE vehiculos_externos
+                    ADD COLUMN IF NOT EXISTS "{columna}" VARCHAR
+                        CHECK ("{columna}" IN ('VALIDADO', 'RECHAZADO'))
+                    """
+                )
+            )
+
+
 def _fila_a_pb(v) -> pb.Vehiculo:
     vehiculo_pb = pb.Vehiculo()
     vehiculo_pb.id = v["id"]
@@ -102,6 +129,10 @@ def _fila_externo_a_pb(v) -> pb.VehiculoExternoResponse:
     externo_pb.estado = pb.EstadoVehiculoExterno.Value(v["estado"])
     externo_pb.creado_en = v["creadoEn"].isoformat()
     externo_pb.actualizado_en = v["actualizadoEn"].isoformat()
+    if v["validacionPatente"] is not None:
+        externo_pb.validacion_patente = v["validacionPatente"]
+    if v["validacionTitularidad"] is not None:
+        externo_pb.validacion_titularidad = v["validacionTitularidad"]
     return externo_pb
 
 
@@ -184,6 +215,144 @@ def _publicar_externo_registrado(
         )
 
 
+def _publicar_validacion_completada(vehiculo_externo_id: int) -> None:
+    # Las dos validaciones ya quedaron guardadas: si el broker falla se
+    # vuelve a publicar al reiniciar (ver _reintentar_externos_pendientes).
+    try:
+        broker.publicar(
+            contratos.EXTERNOS_VALIDACION_COMPLETADA,
+            {"vehiculoExternoId": vehiculo_externo_id},
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[eventos] no se pudo publicar la validación completada del "
+            f"vehículo externo {vehiculo_externo_id} ({error!r})",
+            flush=True,
+        )
+
+
+def _reintentar_externos_pendientes(engine) -> None:
+    """Retoma solicitudes PENDIENTE cuyo evento pudo haberse perdido.
+
+    - Con las dos validaciones VALIDADO: falta publicar completada.
+    - Con alguna validación sin resultado: se vuelve a publicar registrados.
+      Si los resultados ya estaban en camino llegan repetidos, y el
+      correlador los procesa sin efecto (es idempotente).
+    """
+    with engine.connect() as conn:
+        pendientes = conn.execute(
+            text(
+                """
+                SELECT id, "clienteId", patente,
+                       "validacionPatente", "validacionTitularidad"
+                FROM vehiculos_externos
+                WHERE estado = 'PENDIENTE'
+                """
+            )
+        ).mappings().all()
+    for v in pendientes:
+        if v["validacionPatente"] == v["validacionTitularidad"] == "VALIDADO":
+            _publicar_validacion_completada(v["id"])
+        else:
+            _publicar_externo_registrado(v["id"], v["clienteId"], v["patente"])
+
+
+# Columna de vehiculos_externos donde el correlador guarda cada resultado.
+_COLUMNA_VALIDACION = {
+    contratos.EXTERNOS_VALIDACION_PATENTE: "validacionPatente",
+    contratos.EXTERNOS_VALIDACION_TITULARIDAD: "validacionTitularidad",
+}
+
+
+def _correlacionar_validacion_externo(engine, payload: dict, evento: dict) -> None:
+    """Correlador: junta los resultados de las dos validaciones de una misma
+    solicitud, que llegan en cualquier orden, usando vehiculoExternoId.
+
+    - Un RECHAZADO deja la solicitud RECHAZADO y el vehículo no se incorpora.
+    - Con los dos VALIDADO publica vehiculos.externos.validacion.completada.
+    - Si falta un resultado, solo guarda el que llegó y espera al otro.
+    """
+    vehiculo_externo_id = payload["vehiculoExternoId"]
+    columna = _COLUMNA_VALIDACION[evento["tipo"]]
+    resultado = payload["resultado"]
+
+    # FOR UPDATE: si los dos resultados se procesaran a la vez, el segundo
+    # espera al primero y ve su resultado ya guardado.
+    with engine.begin() as conn:
+        externo = conn.execute(
+            text(
+                """
+                SELECT estado, "validacionPatente", "validacionTitularidad"
+                FROM vehiculos_externos
+                WHERE id = :id
+                FOR UPDATE
+                """
+            ),
+            {"id": vehiculo_externo_id},
+        ).mappings().first()
+
+        if externo is None:
+            print(
+                f"[eventos] {evento['tipo']} para vehículo externo "
+                f"{vehiculo_externo_id} inexistente; se ignora",
+                flush=True,
+            )
+            return
+        if externo["estado"] != "PENDIENTE":
+            # Ya se resolvió (resultado repetido o llegado después de un
+            # rechazo): si faltaba se guarda para dejar constancia, pero la
+            # decisión no cambia.
+            conn.execute(
+                text(
+                    f"""
+                    UPDATE vehiculos_externos
+                    SET "{columna}" = :resultado
+                    WHERE id = :id AND "{columna}" IS NULL
+                    """
+                ),
+                {"id": vehiculo_externo_id, "resultado": resultado},
+            )
+            print(
+                f"[eventos] vehículo externo {vehiculo_externo_id} ya está "
+                f"{externo['estado']}; {columna} = {resultado} no cambia la "
+                f"decisión",
+                flush=True,
+            )
+            return
+
+        validaciones = {
+            "validacionPatente": externo["validacionPatente"],
+            "validacionTitularidad": externo["validacionTitularidad"],
+            columna: resultado,
+        }
+        rechazado = "RECHAZADO" in validaciones.values()
+        completo = all(v == "VALIDADO" for v in validaciones.values())
+
+        conn.execute(
+            text(
+                f"""
+                UPDATE vehiculos_externos
+                SET "{columna}" = :resultado,
+                    estado = CASE WHEN :rechazado THEN 'RECHAZADO' ELSE estado END,
+                    "actualizadoEn" = now()
+                WHERE id = :id
+                """
+            ),
+            {"id": vehiculo_externo_id, "resultado": resultado, "rechazado": rechazado},
+        )
+
+    print(
+        f"[eventos] vehículo externo {vehiculo_externo_id}: {columna} = "
+        f"{resultado}"
+        + (" -> RECHAZADO" if rechazado else "")
+        + (" -> validaciones completas" if completo else ""),
+        flush=True,
+    )
+    # Se publica después del commit, como el resto de los eventos.
+    if completo:
+        _publicar_validacion_completada(vehiculo_externo_id)
+
+
 def _completar_validacion_externo(engine, payload: dict, _evento: dict) -> None:
     vehiculo_externo_id = payload["vehiculoExternoId"]
     with engine.begin() as conn:
@@ -191,7 +360,8 @@ def _completar_validacion_externo(engine, payload: dict, _evento: dict) -> None:
             text(
                 """
                 SELECT id, "clienteId", patente, marca, modelo, anio, color,
-                       "tipoVehiculo", "precioDiario", estado
+                       "tipoVehiculo", "precioDiario", estado,
+                       "validacionPatente", "validacionTitularidad"
                 FROM vehiculos_externos
                 WHERE id = :id
                 FOR UPDATE
@@ -204,6 +374,20 @@ def _completar_validacion_externo(engine, payload: dict, _evento: dict) -> None:
             print(
                 f"[eventos] validación completada para vehículo externo "
                 f"{vehiculo_externo_id} inexistente; se ignora",
+                flush=True,
+            )
+            return
+        # Solo se incorpora lo que el correlador aprobó: un completada
+        # publicado a mano o para una solicitud rechazada no tiene efecto.
+        if not (
+            externo["estado"] != "RECHAZADO"
+            and externo["validacionPatente"] == "VALIDADO"
+            and externo["validacionTitularidad"] == "VALIDADO"
+        ):
+            print(
+                f"[eventos] validación completada para vehículo externo "
+                f"{vehiculo_externo_id} sin las dos validaciones aprobadas "
+                f"(estado {externo['estado']}); se ignora",
                 flush=True,
             )
             return
@@ -518,6 +702,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                          now(), now())
                     RETURNING id, "clienteId", patente, marca, modelo, anio, color,
                               "tipoVehiculo", "precioDiario", estado,
+                              "validacionPatente", "validacionTitularidad",
                               "creadoEn", "actualizadoEn"
                     """
                 ),
@@ -536,9 +721,37 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         _publicar_externo_registrado(ve["id"], ve["clienteId"], ve["patente"])
         return _fila_externo_a_pb(ve)
 
+    def ListarVehiculosExternos(self, request, context):
+        print(
+            f"[gRPC] ListarVehiculosExternos(cliente={request.cliente_id}) "
+            f"invocado por el Gateway",
+            flush=True,
+        )
+        with self.engine.connect() as conn:
+            externos = conn.execute(
+                text(
+                    """
+                    SELECT id, "clienteId", patente, marca, modelo, anio, color,
+                           "tipoVehiculo", "precioDiario", estado,
+                           "validacionPatente", "validacionTitularidad",
+                           "creadoEn", "actualizadoEn"
+                    FROM vehiculos_externos
+                    WHERE "clienteId" = :cliente_id
+                    ORDER BY "creadoEn" DESC, id DESC
+                    """
+                ),
+                {"cliente_id": request.cliente_id},
+            ).mappings().all()
+
+        respuesta = pb.ListarVehiculosExternosResponse()
+        for v in externos:
+            respuesta.vehiculos.append(_fila_externo_a_pb(v))
+        return respuesta
+
 
 def main():
     engine = engine_desde_env()
+    asegurar_esquema_externos(engine)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     pb_grpc.add_VehiculoServiceServicer_to_server(
         VehiculoServiceServicer(engine), server
@@ -556,6 +769,18 @@ def main():
             )
         },
     )
+    # Correlador: los dos resultados de validación llegan a la misma cola.
+    broker.escuchar(
+        contratos.COLA_VEHICULOS_EXTERNOS_VALIDACIONES,
+        {
+            contratos.EXTERNOS_VALIDACION_PATENTE: lambda payload, evento: (
+                _correlacionar_validacion_externo(engine, payload, evento)
+            ),
+            contratos.EXTERNOS_VALIDACION_TITULARIDAD: lambda payload, evento: (
+                _correlacionar_validacion_externo(engine, payload, evento)
+            ),
+        },
+    )
     broker.escuchar(
         contratos.COLA_VEHICULOS_EXTERNOS_COMPLETADA,
         {
@@ -565,6 +790,7 @@ def main():
         },
     )
     _reintentar_verificaciones_pendientes(engine)
+    _reintentar_externos_pendientes(engine)
     server.wait_for_termination()
 
 
