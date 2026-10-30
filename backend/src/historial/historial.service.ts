@@ -35,7 +35,7 @@ export class HistorialService implements OnModuleInit {
 
   async porCliente(clienteId: number): Promise<HistorialAlquiler[]> {
     const response = await firstValueFrom(
-      this.reservasGrpc.consultarHistorial({ clienteId }),
+      this.reservasGrpc.listarHistorial({ clienteId }),
     );
     const reservas = response.reservas ?? [];
     if (reservas.length === 0) return [];

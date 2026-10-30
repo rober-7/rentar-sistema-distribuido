@@ -281,8 +281,8 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
         _publicar_reserva_confirmada(reserva)
         return _fila_a_pb(reserva)
 
-    def ConsultarReservas(self, request, context):
-        print("[gRPC] ConsultarReservas invocado por el Gateway", flush=True)
+    def ListarReservas(self, request, context):
+        print("[gRPC] ListarReservas invocado por el Gateway", flush=True)
         condiciones = []
         parametros = {}
         if request.HasField("cliente_id"):
@@ -301,7 +301,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
         with self.engine.connect() as conn:
             reservas = conn.execute(text(consulta), parametros).mappings().all()
 
-        respuesta = pb.ConsultarReservasResponse()
+        respuesta = pb.ListarReservasResponse()
         for reserva in reservas:
             respuesta.reservas.append(_fila_a_pb(reserva))
         return respuesta
@@ -356,8 +356,8 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             ).mappings().one()
         return _fila_a_pb(reserva_actualizada)
 
-    def ConsultarHistorial(self, request, context):
-        print("[gRPC] ConsultarHistorial invocado por el Gateway", flush=True)
+    def ListarHistorial(self, request, context):
+        print("[gRPC] ListarHistorial invocado por el Gateway", flush=True)
         condiciones = [
             "(estado = 'CANCELADA' OR "
             "(estado = 'CONFIRMADA' AND \"fechaFinalizacion\" <= now()))"
@@ -378,7 +378,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 parametros,
             ).mappings().all()
 
-        respuesta = pb.ConsultarHistorialResponse()
+        respuesta = pb.ListarHistorialResponse()
         for reserva in reservas:
             item = dict(reserva)
             if item["estado"] == "CONFIRMADA":
@@ -386,8 +386,8 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             respuesta.reservas.append(_fila_a_pb(item))
         return respuesta
 
-    def ConsultarVehiculosOcupados(self, request, context):
-        print("[gRPC] ConsultarVehiculosOcupados invocado", flush=True)
+    def ListarVehiculosOcupados(self, request, context):
+        print("[gRPC] ListarVehiculosOcupados invocado", flush=True)
         inicio = _parsear_fecha(request.fecha_inicio, "fecha_inicio", context)
         fin = _parsear_fecha(
             request.fecha_finalizacion, "fecha_finalizacion", context
@@ -412,14 +412,14 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 ),
                 {"inicio": inicio, "fin": fin},
             ).all()
-        return pb.ConsultarVehiculosOcupadosResponse(
+        return pb.ListarVehiculosOcupadosResponse(
             vehiculo_ids=[fila[0] for fila in filas]
         )
 
-    def ConsultarEstadosVehiculos(self, request, context):
-        print("[gRPC] ConsultarEstadosVehiculos invocado", flush=True)
+    def ListarEstadosVehiculos(self, request, context):
+        print("[gRPC] ListarEstadosVehiculos invocado", flush=True)
         ids = list(request.vehiculo_ids)
-        respuesta = pb.ConsultarEstadosVehiculosResponse()
+        respuesta = pb.ListarEstadosVehiculosResponse()
         if not ids:
             return respuesta
 

@@ -67,7 +67,7 @@ export class ReservasService implements OnModuleInit {
         ? { ...filtro, clienteId: user.id }
         : filtro;
     const response = await firstValueFrom(
-      this.reservasGrpc.consultarReservas({
+      this.reservasGrpc.listarReservas({
         ...(filtroAplicado.clienteId !== undefined && {
           clienteId: filtroAplicado.clienteId,
         }),
