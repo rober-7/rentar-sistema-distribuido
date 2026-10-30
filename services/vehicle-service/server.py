@@ -103,19 +103,25 @@ def _fila_a_pb(v) -> pb.Vehiculo:
     vehiculo_pb.anio = v["anio"]
     if v["color"] is not None:
         vehiculo_pb.color = v["color"]
-    vehiculo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(v["tipoVehiculo"])
+    vehiculo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(
+        f"TIPO_VEHICULO_{v['tipoVehiculo']}"
+    )
     vehiculo_pb.precio_diario = float(v["precioDiario"])
-    vehiculo_pb.estado = pb.EstadoVehiculo.Value(v["estado"])
+    vehiculo_pb.estado = pb.EstadoVehiculo.Value(
+        f"ESTADO_VEHICULO_{v['estado']}"
+    )
     vehiculo_pb.activo = v["activo"]
     vehiculo_pb.creado_en = v["creadoEn"].isoformat()
     vehiculo_pb.actualizado_en = v["actualizadoEn"].isoformat()
     if v["verificacion"] is not None:
-        vehiculo_pb.verificacion = pb.ResultadoVerificacion.Value(v["verificacion"])
+        vehiculo_pb.verificacion = pb.ResultadoVerificacion.Value(
+            f"RESULTADO_VERIFICACION_{v['verificacion']}"
+        )
     return vehiculo_pb
 
 
-def _fila_externo_a_pb(v) -> pb.VehiculoExternoResponse:
-    externo_pb = pb.VehiculoExternoResponse()
+def _fila_externo_a_pb(v) -> pb.VehiculoExterno:
+    externo_pb = pb.VehiculoExterno()
     externo_pb.id = v["id"]
     externo_pb.cliente_id = v["clienteId"]
     externo_pb.patente = v["patente"]
@@ -124,9 +130,13 @@ def _fila_externo_a_pb(v) -> pb.VehiculoExternoResponse:
     externo_pb.anio = v["anio"]
     if v["color"] is not None:
         externo_pb.color = v["color"]
-    externo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(v["tipoVehiculo"])
+    externo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(
+        f"TIPO_VEHICULO_{v['tipoVehiculo']}"
+    )
     externo_pb.precio_diario = float(v["precioDiario"])
-    externo_pb.estado = pb.EstadoVehiculoExterno.Value(v["estado"])
+    externo_pb.estado = pb.EstadoVehiculoExterno.Value(
+        f"ESTADO_VEHICULO_EXTERNO_{v['estado']}"
+    )
     externo_pb.creado_en = v["creadoEn"].isoformat()
     externo_pb.actualizado_en = v["actualizadoEn"].isoformat()
     if v["validacionPatente"] is not None:
@@ -482,7 +492,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     f"No existe un vehículo con id {request.id}",
                 )
 
-            return _fila_a_pb(v)
+            return pb.ObtenerVehiculoResponse(vehiculo=_fila_a_pb(v))
 
     def FiltrarVehiculos(self, request, context):
         print(
@@ -498,7 +508,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             condiciones.append('"tipoVehiculo" = :tipo_vehiculo')
             parametros["tipo_vehiculo"] = pb.TipoVehiculo.Name(
                 request.tipo_vehiculo
-            )
+            ).removeprefix("TIPO_VEHICULO_")
         if request.HasField("marca"):
             condiciones.append("marca ILIKE :marca")
             parametros["marca"] = f"%{request.marca}%"
@@ -523,7 +533,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         with self.engine.connect() as conn:
             vehiculos = conn.execute(text(sql), parametros).mappings().all()
 
-        respuesta = pb.ListarVehiculosResponse()
+        respuesta = pb.FiltrarVehiculosResponse()
         for v in vehiculos:
             respuesta.vehiculos.append(_fila_a_pb(v))
         return respuesta
@@ -534,7 +544,9 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             f"{pb.EstadoVehiculo.Name(request.estado)}) invocado",
             flush=True,
         )
-        nuevo_estado = pb.EstadoVehiculo.Name(request.estado)
+        nuevo_estado = pb.EstadoVehiculo.Name(request.estado).removeprefix(
+            "ESTADO_VEHICULO_"
+        )
         with self.engine.begin() as conn:
             v = conn.execute(
                 text(
@@ -555,7 +567,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 grpc.StatusCode.NOT_FOUND,
                 f"No existe un vehículo con id {request.id}",
             )
-        return _fila_a_pb(v)
+        return pb.ActualizarEstadoResponse(vehiculo=_fila_a_pb(v))
 
     def CrearVehiculo(self, request, context):
         print(
@@ -593,7 +605,9 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     "modelo": request.modelo,
                     "anio": request.anio,
                     "color": request.color if request.HasField("color") else None,
-                    "tipo_vehiculo": pb.TipoVehiculo.Name(request.tipo_vehiculo),
+                    "tipo_vehiculo": pb.TipoVehiculo.Name(
+                        request.tipo_vehiculo
+                    ).removeprefix("TIPO_VEHICULO_"),
                     "precio_diario": request.precio_diario,
                 },
             ).mappings().first()
@@ -601,7 +615,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         # Se publica después del commit: el Gateway recibe la respuesta sin
         # esperar la verificación, que llega más tarde por RabbitMQ.
         _solicitar_verificacion(v["id"], v["patente"])
-        return _fila_a_pb(v)
+        return pb.CrearVehiculoResponse(vehiculo=_fila_a_pb(v))
 
     def ActualizarVehiculo(self, request, context):
         print(
@@ -631,7 +645,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             sets.append('"tipoVehiculo" = :tipo_vehiculo')
             parametros["tipo_vehiculo"] = pb.TipoVehiculo.Name(
                 request.tipo_vehiculo
-            )
+            ).removeprefix("TIPO_VEHICULO_")
         if request.HasField("precio_diario"):
             sets.append('"precioDiario" = :precio_diario')
             parametros["precio_diario"] = request.precio_diario
@@ -655,7 +669,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     grpc.StatusCode.NOT_FOUND,
                     f"No existe un vehículo con id {request.id}",
                 )
-        return _fila_a_pb(v)
+        return pb.ActualizarVehiculoResponse(vehiculo=_fila_a_pb(v))
 
     def RegistrarVehiculoExterno(self, request, context):
         print(
@@ -713,13 +727,17 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     "modelo": request.modelo,
                     "anio": request.anio,
                     "color": request.color if request.HasField("color") else None,
-                    "tipo_vehiculo": pb.TipoVehiculo.Name(request.tipo_vehiculo),
+                    "tipo_vehiculo": pb.TipoVehiculo.Name(
+                        request.tipo_vehiculo
+                    ).removeprefix("TIPO_VEHICULO_"),
                     "precio_diario": request.precio_diario,
                 },
             ).mappings().first()
 
         _publicar_externo_registrado(ve["id"], ve["clienteId"], ve["patente"])
-        return _fila_externo_a_pb(ve)
+        return pb.RegistrarVehiculoExternoResponse(
+            vehiculo=_fila_externo_a_pb(ve)
+        )
 
     def ListarVehiculosExternos(self, request, context):
         print(

@@ -113,7 +113,7 @@ def documento_cliente(customer_client, cliente_id: int) -> str | None:
     rentar.errores y queda a la vista en la consola de RabbitMQ.
     """
     try:
-        cliente = customer_client.ObtenerCliente(
+        respuesta = customer_client.ObtenerCliente(
             clientes_pb2.ObtenerClienteRequest(id=cliente_id),
             timeout=10,
             wait_for_ready=True,
@@ -122,7 +122,7 @@ def documento_cliente(customer_client, cliente_id: int) -> str | None:
         if error.code() == grpc.StatusCode.NOT_FOUND:
             return None
         raise
-    return cliente.documento
+    return respuesta.cliente.documento
 
 
 def verificar_vehiculo(engine, payload: dict, _evento: dict) -> None:

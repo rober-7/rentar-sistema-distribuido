@@ -14,12 +14,12 @@ service ReservaService {
   // Registra un nuevo alquiler en el sistema y emite un evento de confirmación.
   // Requiere: IDs válidos de cliente y vehículo, y un rango de fechas futuras.
   // Devuelve: La reserva creada con el importe total calculado y estado inicial.
-  rpc CrearReserva(CrearReservaRequest) returns (Reserva);
+  rpc CrearReserva(CrearReservaRequest) returns (CrearReservaResponse);
   
   // Cancela una reserva antes de que el alquiler comience.
   // Requiere: El ID de la reserva y el ID del cliente (por seguridad).
   // Devuelve: La reserva actualizada con estado CANCELADA.
-  rpc CancelarReserva(CancelarReservaRequest) returns (Reserva);
+  rpc CancelarReserva(CancelarReservaRequest) returns (CancelarReservaResponse);
   
   // Lista las reservas activas en el sistema.
   // Requiere: Filtros opcionales por cliente o por estado.
@@ -45,9 +45,9 @@ service ReservaService {
 // Estados posibles en el ciclo de vida de una reserva.
 enum EstadoReserva {
   ESTADO_RESERVA_UNSPECIFIED = 0;
-  CONFIRMADA = 1;
-  CANCELADA = 2;
-  FINALIZADA = 3;
+  ESTADO_RESERVA_CONFIRMADA = 1;
+  ESTADO_RESERVA_CANCELADA = 2;
+  ESTADO_RESERVA_FINALIZADA = 3;
 }
 
 // Representa la entidad principal de una Reserva en el sistema.
@@ -70,10 +70,20 @@ message CrearReservaRequest {
   string fecha_finalizacion = 4;
 }
 
+// Respuesta exclusiva del alta de reserva.
+message CrearReservaResponse {
+  Reserva reserva = 1;
+}
+
 // Solicitud para cancelar una reserva existente.
 message CancelarReservaRequest {
   int32 id = 1;
   int32 cliente_id = 2;
+}
+
+// Respuesta exclusiva de la cancelacion de reserva.
+message CancelarReservaResponse {
+  Reserva reserva = 1;
 }
 
 // Solicitud para buscar reservas mediante filtros.

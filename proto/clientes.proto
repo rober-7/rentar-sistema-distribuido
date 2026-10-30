@@ -14,23 +14,23 @@ service ClienteService {
    // Registra un nuevo cliente en el sistema.
   // Requiere: Datos personales, de contacto y contraseña en texto plano.
   // Devuelve: El objeto Cliente creado. Lanza ALREADY_EXISTS si el documento o email ya existen.
-  rpc CrearCliente (CrearClienteRequest) returns (Cliente);
+  rpc CrearCliente (CrearClienteRequest) returns (CrearClienteResponse);
 
   // Modifica parcialmente los datos de un cliente existente.
   // Requiere: El ID del cliente y los campos específicos a modificar.
   // Devuelve: El objeto Cliente con los datos actualizados.
   // Nota: El documento es inmutable
-  rpc ActualizarCliente (ActualizarClienteRequest) returns (Cliente);
+  rpc ActualizarCliente (ActualizarClienteRequest) returns (ActualizarClienteResponse);
 
   // Ejecuta la baja lógica de un cliente (cambia su estado activo a false).
   // Requiere: El ID del cliente a dar de baja.
   // Devuelve: El objeto Cliente modificado (con activo = false).
-  rpc EliminarCliente (EliminarClienteRequest) returns (Cliente);
+  rpc EliminarCliente (EliminarClienteRequest) returns (EliminarClienteResponse);
 
   // Consulta los datos detallados de un cliente específico.
   // Requiere: El ID del cliente a consultar.
   // Devuelve: El objeto Cliente con toda su información. Lanza NOT_FOUND si no existe.
-  rpc ObtenerCliente(ObtenerClienteRequest) returns (Cliente);
+  rpc ObtenerCliente(ObtenerClienteRequest) returns (ObtenerClienteResponse);
 
   // Lista todos los clientes registrados en el sistema.
   // Requiere: Petición vacía.
@@ -83,6 +83,11 @@ message CrearClienteRequest {
   optional string rol = 8;
 }
 
+// Respuesta exclusiva del alta de cliente.
+message CrearClienteResponse {
+  Cliente cliente = 1;
+}
+
 // Estructura para actualizar información. Los campos 'optional' omitidos 
 // no sobreescriben los valores actuales en la base de datos.
 message ActualizarClienteRequest {
@@ -94,14 +99,29 @@ message ActualizarClienteRequest {
   optional bool activo = 6;
 }
 
+// Respuesta exclusiva de la modificacion de cliente.
+message ActualizarClienteResponse {
+  Cliente cliente = 1;
+}
+
 // Solicitud para dar de baja lógica de un cliente.
 message EliminarClienteRequest {
   int32 id = 1;
 }
 
+// Respuesta exclusiva de la baja logica de cliente.
+message EliminarClienteResponse {
+  Cliente cliente = 1;
+}
+
 // Solicitud para buscar un cliente puntual mediante su identificador.
 message ObtenerClienteRequest {
   int32 id = 1;
+}
+
+// Respuesta exclusiva de la consulta individual de cliente.
+message ObtenerClienteResponse {
+  Cliente cliente = 1;
 }
 
 // Solicitud sin parámetros para listar clientes.

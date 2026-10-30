@@ -18,6 +18,10 @@ export interface VehiculoGrpc {
   verificacion?: string;
 }
 
+export interface VehiculoGrpcResponse {
+  vehiculo: VehiculoGrpc;
+}
+
 export interface FiltrarVehiculosGrpcRequest {
   tipoVehiculo?: string;
   marca?: string;
@@ -76,21 +80,27 @@ export interface VehiculoExternoGrpc {
   validacionTitularidad?: string;
 }
 
+export interface VehiculoExternoGrpcResponse {
+  vehiculo: VehiculoExternoGrpc;
+}
+
 export interface VehiculoServiceGrpcClient {
   listarVehiculos(data: Record<string, never>): Observable<{
     vehiculos: VehiculoGrpc[];
   }>;
-  obtenerVehiculo(data: { id: number }): Observable<VehiculoGrpc>;
+  obtenerVehiculo(data: { id: number }): Observable<VehiculoGrpcResponse>;
   filtrarVehiculos(
     data: FiltrarVehiculosGrpcRequest,
   ): Observable<{ vehiculos: VehiculoGrpc[] }>;
-  crearVehiculo(data: CrearVehiculoGrpcRequest): Observable<VehiculoGrpc>;
+  crearVehiculo(
+    data: CrearVehiculoGrpcRequest,
+  ): Observable<VehiculoGrpcResponse>;
   actualizarVehiculo(
     data: ActualizarVehiculoGrpcRequest,
-  ): Observable<VehiculoGrpc>;
+  ): Observable<VehiculoGrpcResponse>;
   registrarVehiculoExterno(
     data: RegistrarVehiculoExternoGrpcRequest,
-  ): Observable<VehiculoExternoGrpc>;
+  ): Observable<VehiculoExternoGrpcResponse>;
   listarVehiculosExternos(data: {
     clienteId: number;
   }): Observable<{ vehiculos?: VehiculoExternoGrpc[] }>;

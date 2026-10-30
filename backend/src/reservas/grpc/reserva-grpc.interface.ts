@@ -11,13 +11,17 @@ export interface ReservaGrpc {
   activo: boolean;
 }
 
+export interface ReservaGrpcResponse {
+  reserva: ReservaGrpc;
+}
+
 export interface ReservaServiceGrpcClient {
   crearReserva(data: {
     vehiculoId: number;
     clienteId: number;
     fechaInicio: string;
     fechaFinalizacion: string;
-  }): Observable<ReservaGrpc>;
+  }): Observable<ReservaGrpcResponse>;
   listarReservas(data: {
     clienteId?: number;
     estado?: string;
@@ -25,7 +29,7 @@ export interface ReservaServiceGrpcClient {
   cancelarReserva(data: {
     id: number;
     clienteId: number;
-  }): Observable<ReservaGrpc>;
+  }): Observable<ReservaGrpcResponse>;
   listarHistorial(data: {
     clienteId?: number;
   }): Observable<{ reservas: ReservaGrpc[] }>;
