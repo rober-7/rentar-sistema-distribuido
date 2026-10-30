@@ -1,51 +1,239 @@
 # Rentar - Sistema Distribuido
 
-Sistema de alquiler de vehículos. Trabajo práctico de la materia **Desarrollo de Software en Sistemas Distribuidos** (UNLa).
+**Rentar** es un sistema de alquiler de vehículos. Es el trabajo práctico de la
+materia **Desarrollo de Software en Sistemas Distribuidos** de la Universidad
+Nacional de Lanús (UNLa).
 
-## Stack
+Desde la página web:
 
-- **API Gateway:** NestJS + TypeScript + GraphQL (Apollo) — `backend/`
-- **Vehicle Service:** Python + grpcio + SQLAlchemy — `services/vehicle-service/`
-- **Customer Service:** Python + grpcio + SQLAlchemy — `services/customer-service/`
-- **Rental Service:** Python + grpcio + SQLAlchemy — `services/rental-service/`
-- **Registros Service:** Python + pika + SQLAlchemy — `services/registros-service/` (registros externos simulados, solo eventos)
-- **Mantenimiento Service:** Python + pika + SQLAlchemy — `services/mantenimiento-service/` (solicitudes de mantenimiento por eventos)
-- **Comunicación Gateway ↔ servicios internos:** gRPC (contratos en `proto/`)
-- **Comunicación asíncrona entre servicios:** RabbitMQ (contratos en `eventos/`)
-- **Frontend:** React + Vite
-- **Infraestructura:** Docker Compose
+- **el administrador** gestiona los vehículos, los clientes y las reservas;
+- **los clientes** buscan autos disponibles, reservan, cancelan, ven su
+  historial y pueden ofrecer su propio auto para que Rentar lo alquile.
 
-## Arquitectura
+## Un proyecto construido por entregas
+
+El sistema no se hizo de una sola vez: se construyó en **tres entregas
+incrementales**, llamadas *hitos*. Cada hito parte de lo que ya funcionaba y le
+suma algo nuevo, sin perder lo anterior. Cada entrega quedó marcada con un
+**tag** (una etiqueta) en la rama `main`, que guarda el proyecto exactamente
+como se entregó.
+
+| Entrega | Tag | Fecha | La idea en una frase |
+|---|---|---|---|
+| **Hito 3** | [`hito-3`](https://github.com/rober-7/rentar-sistema-distribuido/tree/hito-3) | 30/10/2026 | Algunas tareas pasan a resolverse **en segundo plano**, sin hacer esperar al usuario. |
+| **Hito 2** | [`hito-2`](https://github.com/rober-7/rentar-sistema-distribuido/tree/hito-2) | 12/10/2026 | El sistema se divide en **servicios especializados**, cada uno con sus propios datos. |
+| **Hito 1** | [`hito-1`](https://github.com/rober-7/rentar-sistema-distribuido/tree/hito-1) | 21/09/2026 | La **primera versión** funcionando, con todas las operaciones básicas. |
+
+Para ver una entrega tal como se presentó: en GitHub, abrí el selector de ramas,
+elegí la pestaña **Tags** y después el hito. Desde la terminal:
+`git checkout hito-1` (o `hito-2`, `hito-3`).
+
+---
+
+### Hito 3: tareas en segundo plano
+
+**El problema:** hay tareas que llevan tiempo y que el usuario no necesita ver
+terminadas en el momento. Hacerlo esperar hasta que terminen no tiene sentido.
+
+**La solución:** es como dejar un pedido en un mostrador y que te avisen cuando
+está listo. El sistema anota la tarea, responde enseguida y la tarea se resuelve
+por detrás. Para eso se sumó un **sistema de mensajería** (RabbitMQ) que
+funciona como un correo interno: un servicio deja un mensaje y otro lo levanta
+cuando puede, sin que ninguno tenga que esperar al otro.
+
+Con esa base se agregaron tres procesos:
+
+1. **Control de autos robados.** Cuando el administrador da de alta un
+   vehículo, el sistema consulta en segundo plano un registro policial
+   simulado. Si la patente tiene una denuncia de robo, el auto queda marcado y
+   nadie lo puede reservar.
+2. **Autos de particulares.** Un cliente puede ofrecer su propio auto para que
+   Rentar lo alquile. Antes de aceptarlo se hacen dos controles al mismo
+   tiempo: que la patente no esté denunciada y que el cliente sea realmente el
+   dueño, según un registro automotor simulado. Si los dos controles dan bien,
+   el auto se suma a la flota; si alguno falla, se rechaza. El cliente puede
+   seguir el resultado en vivo desde la pantalla **"Mis Vehículos Ofrecidos"**.
+3. **Mantenimiento preventivo.** Cada vez que se confirma una reserva, se pide
+   un mantenimiento del auto. La reserva se confirma al instante y el
+   resultado del mantenimiento queda registrado unos segundos después.
+
+<details>
+<summary><strong>Detalle técnico del Hito 3</strong></summary>
+
+- **Broker:** RabbitMQ 3.13, con un exchange `topic` y una cola por consumidor.
+  Los eventos, las colas, el formato de cada mensaje y las reglas para
+  consumidores están en [`eventos/README.md`](eventos/README.md).
+- **Servicios nuevos:** Registros Service (registros policial y automotor
+  simulados) y Mantenimiento Service, cada uno con su propia base.
+- **Combinación síncrona y asíncrona:** lo que necesita una respuesta inmediata
+  sigue por gRPC. Lo que puede esperar viaja como evento. El Gateway no se
+  conecta al broker: consulta por gRPC el estado que van dejando los eventos.
+
+**Incorporación de vehículos externos, componente por componente:**
+
+- **Frontend:** formulario [`PublicarVehiculo.jsx`](frontend/src/pages/PublicarVehiculo.jsx)
+  (`/cliente/publicar-vehiculo`) y vista
+  [`MisVehiculosOfrecidos.jsx`](frontend/src/pages/MisVehiculosOfrecidos.jsx)
+  (`/cliente/mis-vehiculos`). Esta muestra el resultado de cada validación y
+  se vuelve a consultar cada 2 segundos mientras haya solicitudes pendientes.
+  Los dos accesos están en la tarjeta "Ofrecer mi Vehículo" del Home del
+  cliente.
+- **API Gateway:** [`VehiculosExternosController`](backend/src/vehiculos/vehiculos-externos.controller.ts)
+  expone `POST /vehiculos/externos` (alta) y `GET /vehiculos/externos`
+  (solicitudes del cliente). Exige rol `CLIENTE`, y el `clienteId` sale del
+  JWT, nunca del body, así nadie puede actuar en nombre de otro.
+- **Vehicle Service:**
+  - `RegistrarVehiculoExterno` guarda la solicitud `PENDIENTE` en
+    `vehiculos_externos`, con control de duplicados, y publica
+    `vehiculos.externos.registrados`.
+  - **Correlador** (cola `vehiculos.externos-validaciones`): junta los dos
+    resultados por `vehiculoExternoId`, que pueden llegar en cualquier orden.
+    Los guarda en `validacionPatente` y `validacionTitularidad`. Un `RECHAZADO`
+    rechaza la solicitud; dos `VALIDADO` publican
+    `vehiculos.externos.validacion.completada`. Usa `SELECT ... FOR UPDATE`
+    para que dos resultados simultáneos no se pisen.
+  - El consumidor de `completada` incorpora el vehículo como `DISPONIBLE`,
+    pero solo si las dos validaciones están aprobadas.
+  - Al arrancar, retoma las solicitudes `PENDIENTE` cuyo evento pudo perderse.
+- **Registros Service:** consume `vehiculos.externos.registrados` desde dos
+  colas independientes. Valida la patente contra `patentes_robadas`, y la
+  titularidad contra `titularidades`, pidiendo el documento del cliente a
+  Customer Service por gRPC.
+
+**Mejora futura:** hoy cualquier cliente puede reservar un vehículo externo
+incorporado, incluso su propio dueño. Se podría agregar una regla que lo
+impida.
+
+</details>
+
+---
+
+### Hito 2: servicios especializados
+
+**El problema:** en el Hito 1 todo vivía en un solo programa con una sola base
+de datos. Funciona, pero si una parte falla o hay que cambiarla, se toca todo.
+
+**La solución:** es como una empresa que se organiza por áreas. El sistema se
+dividió en tres **servicios especializados**: uno para clientes, uno para
+vehículos y uno para reservas. Cada uno guarda **sus propios datos** y nadie
+toca los datos de otro: si un área necesita algo de otra, se lo pide. Por
+delante quedó el **API Gateway**, que funciona como la mesa de entrada: recibe
+todo lo que llega desde la página web y lo deriva al área que corresponde.
+
+Para el usuario la página sigue haciendo lo mismo. El cambio está adentro. En
+esta entrega también se sumó el **inicio de sesión** con usuario y contraseña,
+con permisos distintos para el administrador y para los clientes.
+
+<details>
+<summary><strong>Detalle técnico del Hito 2</strong></summary>
+
+Arquitectura pedida: interfaz web → **API Gateway** (REST/GraphQL) → **gRPC** →
+3 microservicios de dominio, en un lenguaje distinto al del Gateway (Python), y
+con contratos `.proto` documentados.
+
+| Punto de la consigna | Cómo se resolvió |
+|---|---|
+| 1. API Gateway | Punto de entrada REST/GraphQL en NestJS. No accede a ninguna base: todas las operaciones de dominio llaman a los servicios internos por gRPC. |
+| 2. Vehicle Service | `services/vehicle-service/`: ABM, consultas y filtros de vehículos. |
+| 3. Customer Service | `services/customer-service/`: ABM de clientes, verificaciones de existencia y estado, y validación de login (la contraseña nunca sale del servicio). |
+| 4. Rental Service | `services/rental-service/`: creación, consulta y cancelación de reservas, e historial. |
+| Contratos | `proto/vehiculos.proto`, `proto/clientes.proto` y `proto/reservas.proto`, con fechas en ISO 8601. |
+| Coordinación | Rental Service valida cliente y vehículo por gRPC antes de reservar. El Gateway combina los filtros de Vehicle Service con la ocupación que informa Rental Service. |
+
+Cada servicio tiene su propia base PostgreSQL con credenciales independientes.
+Entre dominios solo se guardan identificadores, que se validan por gRPC. La
+base de reservas impide reservas superpuestas con una restricción `EXCLUDE` de
+PostgreSQL.
+
+</details>
+
+---
+
+### Hito 1: la primera versión
+
+La primera entrega puso a funcionar el sistema completo como **una sola
+aplicación** con **una sola base de datos**, más la página web:
+
+- **Administrador:** alta, baja y modificación de vehículos y de clientes, y
+  gestión de las reservas.
+- **Cliente:** consulta de autos disponibles con filtros (tipo, marca, precio,
+  fechas), alta y cancelación de reservas, consulta de sus reservas e
+  historial de alquileres.
+
+<details>
+<summary><strong>Detalle técnico del Hito 1</strong></summary>
+
+Backend en NestJS + TypeORM sobre PostgreSQL y frontend en React + Vite, todo
+con Docker Compose. Cada funcionalidad se desarrolló en su propia rama a partir
+de `desarrollo`:
+
+| Funcionalidad | Tipo de API |
+|---|---|
+| ABM de vehículos | REST |
+| ABM de clientes | REST |
+| Alta y cancelación de reservas | REST |
+| Consulta de disponibilidad (con filtros) | GraphQL |
+| Consulta de reservas (con filtros) | GraphQL |
+| Historial de alquileres | GraphQL |
+
+REST se usa para las operaciones que modifican datos, y GraphQL para las
+consultas, donde el frontend elige qué campos necesita.
+
+</details>
+
+---
+
+## Cómo está armado hoy
 
 ```text
-Frontend
-   | REST / GraphQL
-   v
-API Gateway
-   |-- gRPC --> Customer Service --> Customer DB
-   |-- gRPC --> Vehicle Service  --> Vehicle DB
-   `-- gRPC --> Rental Service   --> Rental DB
+                     Navegador (frontend React)
+                                │  REST / GraphQL
+                                ▼
+                           API Gateway
+               ┌────────────────┼────────────────┐   gRPC: pide y espera la respuesta
+               ▼                ▼                ▼
+       Customer Service   Vehicle Service   Rental Service
+          customer_db       vehicle_db        rental_db
+                                │                │
+                                └─── RabbitMQ ───┘   eventos: avisa y sigue
+                                    │        │
+                       Registros Service   Mantenimiento Service
+                         registros_db       mantenimiento_db
 ```
 
-El Gateway no accede a PostgreSQL. Cada servicio es dueño de su base y las
-referencias entre dominios se validan mediante gRPC.
+- Cada servicio es dueño de su base de datos; el Gateway no accede a ninguna.
+- **gRPC** se usa cuando hace falta una respuesta en el momento, por ejemplo
+  para validar un cliente antes de reservar.
+- **RabbitMQ** se usa para lo que puede resolverse en segundo plano. La consola
+  queda en http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
+- Registros Service también le pide datos a Customer Service por gRPC, para
+  validar la titularidad.
 
-Desde el Hito 3 los servicios también se comunican por eventos a través de
-RabbitMQ, para los procesos que no necesitan una respuesta inmediata
-(verificación de patentes, incorporación de vehículos externos y mantenimiento
-preventivo). Los eventos, las colas y la forma de usarlos están documentados en
-[`eventos/README.md`](eventos/README.md). La consola de RabbitMQ queda en
-http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
+### Tecnologías
 
-## Cómo levantar el proyecto (para el equipo)
+| Pieza | Tecnología | Carpeta |
+|---|---|---|
+| Frontend | React + Vite | `frontend/` |
+| API Gateway | NestJS + TypeScript, REST y GraphQL (Apollo) | `backend/` |
+| Customer, Vehicle y Rental Service | Python + gRPC + SQLAlchemy | `services/` |
+| Registros y Mantenimiento Service | Python + RabbitMQ (pika) + SQLAlchemy | `services/` |
+| Contratos gRPC | Protocol Buffers | `proto/` |
+| Contratos de eventos | Python | `eventos/` |
+| Bases de datos | PostgreSQL 16, una por servicio | |
+| Infraestructura | Docker Compose | `docker-compose.yml` |
+
+## Cómo levantar el proyecto
 
 ### Requisitos previos
 
-- Tener instalado **Docker Desktop** y dejarlo **corriendo** (el ícono de la ballena tiene que estar activo). No hace falta instalar Node, PostgreSQL ni nada más en tu máquina.
+- Tener instalado **Docker Desktop** y dejarlo **corriendo** (el ícono de la
+  ballena tiene que estar activo). No hace falta instalar Node, PostgreSQL ni
+  nada más en tu máquina.
 
 ### Paso a paso
 
-1. Cloná el repositorio (o hacé `git pull` si ya lo tenías clonado) y parate en la rama `desarrollo`:
+1. Cloná el repositorio (o hacé `git pull` si ya lo tenías clonado) y parate en
+   la rama `desarrollo`:
 
    ```bash
    git clone <url-del-repo>
@@ -54,7 +242,8 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    git pull
    ```
 
-2. Copiá el archivo de variables de entorno de ejemplo (no hace falta editar nada adentro):
+2. Copiá el archivo de variables de entorno de ejemplo (no hace falta editar
+   nada adentro):
 
    ```bash
    cp backend/.env.example backend/.env
@@ -66,13 +255,15 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    docker compose up --build
    ```
 
-   Esto levanta cinco bases PostgreSQL independientes, RabbitMQ, Adminer, los tres servicios gRPC (Python), Registros Service, Mantenimiento Service, el API Gateway (NestJS) y el frontend React. La primera vez tarda un par de minutos (instala dependencias dentro de los contenedores); las siguientes veces es mucho más rápido.
+   Esto levanta cinco bases PostgreSQL independientes, RabbitMQ, Adminer, los
+   cinco servicios Python, el API Gateway y el frontend. La primera vez tarda
+   un par de minutos (instala dependencias dentro de los contenedores); las
+   siguientes veces es mucho más rápido.
 
-   > **Si ya tenías el proyecto levantado de antes del Hito 3**, cambió el
-   > esquema de `vehicle_db` y hay bases nuevas. Rental Service agrega la
-   > columna de resultado de mantenimiento al iniciar; para regenerar las
-   > bases nuevas desde cero usá `docker compose down -v` y después
-   > `docker compose up --build`. Esto borra los datos persistidos.
+   > **Si ya tenías el proyecto levantado de antes del Hito 3**, no hace falta
+   > borrar nada: los servicios agregan solos las tablas y columnas nuevas al
+   > arrancar. Si igual querés empezar de cero, usá `docker compose down -v` y
+   > después `docker compose up --build` (esto borra todos los datos).
 
 4. Cuando termine de levantar, vas a tener disponible:
 
@@ -100,84 +291,6 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    | Registros externos | `registros_db` | `registros` | `registros` | `registros_db` |
    | Mantenimiento | `mantenimiento_db` | `mantenimiento` | `mantenimiento` | `mantenimiento_db` |
 
-
-   ### Acceso inicial
-
-   En el primer inicio, el API Gateway solicita por gRPC a Customer Service la
-   creación idempotente de un administrador.
-
-   | Campo | Valor |
-   |---|---|
-   | Email | `admin@rentar.com` |
-   | Contraseña | Valor configurado en `ADMIN_PASSWORD` dentro de `backend/.env` |
-
-   También se cargan datos demostrativos al crear los volúmenes por primera vez:
-
-   | Perfil | Email | Contraseña |
-   |---|---|---|
-   | Cliente demo | `mfernandez@gmail.com` | `ClienteRentar2026!` |
-
-   El cliente demo tiene tres vehículos precargados para consultar, una
-   reserva futura y un alquiler pasado visible en el historial. Los seeds se
-   ejecutan solamente al crear los volúmenes; `docker compose down` conserva
-   los datos y `docker compose down -v` permite regenerarlos desde cero.
-
-   ### Probar la verificación de vehículos
-
-   El registro policial simulado (`registros_db.patentes_robadas`) se carga
-   solo con el seed, no hace falta cargar nada a mano. Estas patentes están
-   denunciadas como robadas:
-
-   | Patentes denunciadas |
-   |---|
-   | `AD123RB`, `AE456RB`, `AF789RB`, `RBO123` |
-
-   Al crear un vehículo desde **Gestión de Vehículos**, la columna
-   *Verificación* arranca en *Pendiente* y a los pocos segundos pasa a
-   *Robado* si la patente está en esa lista, o a *Validado* si no. Un
-   vehículo robado no aparece en la consulta de disponibilidad y no se puede
-   reservar.
-
-   Para denunciar otra patente, entrá a Adminer con la base de registros
-   externos y ejecutá (la patente va en mayúsculas, sin espacios ni guiones):
-
-   ```sql
-   INSERT INTO patentes_robadas (patente, "fechaDenuncia", descripcion)
-   VALUES ('AB999CD', '2026-10-20', 'Denuncia de prueba');
-   ```
-
-   Para ver los eventos en la consola de RabbitMQ, el flujo completo y cómo
-   publicar eventos de prueba, ver [`eventos/README.md`](eventos/README.md).
-
-   ### Probar el alta de vehículos de propietarios externos (Hito 3 - P3)
-
-   Para probar el alta y el circuito asíncrono de un vehículo externo:
-
-   1. Ingresá al Frontend (http://localhost:5173/login) con el cliente demo (`mfernandez@gmail.com` / `ClienteRentar2026!`).
-   2. En el Home, hacé clic en **"Publicar Vehículo"** dentro de la tarjeta **"Ofrecer mi Vehículo"**.
-   3. Completá el formulario (ej. Patente `AD777EX`, Toyota Corolla 2023, Sedán, $32.000) y hacé clic en **"Publicar Vehículo"**.
-   4. El sistema confirmará el registro en estado **"Pendiente de validación"** y publicará en RabbitMQ el evento `vehiculos.externos.registrados`.
-   5. Registros Service valida la patente y la titularidad en paralelo (unos 3 segundos cada una) y el correlador de Vehicle Service junta los dos resultados. No hace falta hacer nada a mano.
-   6. Hacé clic en **"Seguir el resultado"** (o en **"Mis Vehículos Ofrecidos"** desde la tarjeta del Home). La pantalla `/cliente/mis-vehiculos` muestra cada solicitud con el resultado de las dos validaciones y se actualiza sola cada 2 segundos mientras haya alguna pendiente.
-   7. Si las dos validaciones dan `VALIDADO`, la solicitud pasa a `APROBADO` y el auto entra a la tabla `vehiculos` con estado `DISPONIBLE` y `verificacion = VALIDADO`. Al entrar a **Consultar Disponibilidad**, ya aparece para reservar.
-
-   El seed carga estas patentes para probar cada caso con el cliente demo:
-
-   | Patente | Patente | Titularidad | Resultado |
-   |---|---|---|---|
-   | `AD777EX`, `AE888EX` | `VALIDADO` | `VALIDADO` | `APROBADO`, se incorpora como `DISPONIBLE` |
-   | `AF789RB` | `RECHAZADO` (denunciada) | `VALIDADO` | `RECHAZADO` |
-   | `AG555EX` | `VALIDADO` | `RECHAZADO` (es de otra persona) | `RECHAZADO` |
-   | cualquier otra | `VALIDADO` | `RECHAZADO` (no figura en el registro) | `RECHAZADO` |
-
-   Para ver el resultado de cada validación:
-
-   ```bash
-   docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, patente, estado, \"validacionPatente\", \"validacionTitularidad\" FROM vehiculos_externos ORDER BY id;"
-   ```
-
-   Una patente rechazada se puede volver a enviar: el control de duplicados solo bloquea solicitudes `PENDIENTE` o `APROBADO`.
-
 5. Para bajar todo: `Ctrl+C` en la terminal donde quedó corriendo, y después:
 
    ```bash
@@ -188,24 +301,114 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    seeds desde cero, usá `docker compose down -v`. Esta operación elimina
    todos los volúmenes (las bases y RabbitMQ) y no se puede deshacer.
 
-## Hot reload
+### Usuarios para entrar
 
-Tanto el backend como el frontend corren montados como volúmenes dentro de sus contenedores, así que los cambios que hagas en el código se reflejan automáticamente sin necesidad de reconstruir las imágenes.
+| Perfil | Email | Contraseña |
+|---|---|---|
+| Administrador | `admin@rentar.com` | La que figura en `ADMIN_PASSWORD` dentro de `backend/.env` |
+| Cliente demo | `mfernandez@gmail.com` | `ClienteRentar2026!` |
 
-Los servicios Python también tienen su código montado, pero no usan hot reload:
-después de modificar un `server.py` hay que reiniciar el servicio. Si cambia un
-`requirements.txt`, hay que reconstruir su imagen.
+El administrador se crea solo en el primer inicio. El cliente demo (Martín
+Fernández, documento `32619541`) viene con tres vehículos precargados, una
+reserva futura y un alquiler pasado en el historial. Los datos de ejemplo se
+cargan solamente al crear las bases: `docker compose down` los conserva y
+`docker compose down -v` permite regenerarlos.
 
-## Estructura del repo
+## Cómo probar lo nuevo del Hito 3
+
+Los eventos de cada prueba se pueden ver pasar en la consola de RabbitMQ
+(http://localhost:15672). El flujo completo y cómo publicar eventos de prueba a
+mano están en [`eventos/README.md`](eventos/README.md).
+
+### Control de autos robados
+
+El registro policial simulado ya viene cargado con estas patentes denunciadas:
+
+| Patentes denunciadas |
+|---|
+| `AD123RB`, `AE456RB`, `AF789RB`, `RBO123` |
+
+1. Entrá como administrador y, en **Gestión de Vehículos**, creá un vehículo.
+2. La columna *Verificación* arranca en *Pendiente* y a los pocos segundos pasa
+   a *Robado* si la patente está en la lista, o a *Validado* si no.
+3. Un vehículo robado no aparece en la consulta de disponibilidad y, si se
+   intenta reservar, el sistema lo rechaza.
+
+Para denunciar otra patente, entrá a Adminer con la base de registros externos
+y ejecutá (la patente va en mayúsculas, sin espacios ni guiones):
+
+```sql
+INSERT INTO patentes_robadas (patente, "fechaDenuncia", descripcion)
+VALUES ('AB999CD', '2026-10-20', 'Denuncia de prueba');
+```
+
+### Autos de particulares
+
+1. Entrá con el cliente demo.
+2. En el Home, en la tarjeta **"Ofrecer mi Vehículo"**, hacé clic en
+   **"Publicar Vehículo"**.
+3. Completá el formulario con una de las patentes de la tabla de abajo y hacé
+   clic en **"Publicar Vehículo"**. La solicitud queda **"Pendiente de
+   validación"**.
+4. Hacé clic en **"Seguir el resultado"**. En **"Mis Vehículos Ofrecidos"** se
+   ve cómo se resuelve cada control en unos segundos, sin recargar la página.
+5. Si los dos controles dan bien, el auto aparece en **Consultar
+   Disponibilidad** y se puede reservar como cualquier otro.
+
+El registro automotor simulado trae estas patentes para probar cada caso:
+
+| Patente | ¿Denunciada? | ¿El cliente demo es el dueño? | Resultado |
+|---|---|---|---|
+| `AD777EX`, `AE888EX` | No | Sí | **Aprobado**: se suma a la flota |
+| `AF789RB` | Sí | Sí | **Rechazado** |
+| `AG555EX` | No | No, es de otra persona | **Rechazado** |
+| cualquier otra | No | No figura en el registro | **Rechazado** |
+
+Una patente rechazada se puede volver a enviar. Para ver el detalle en la base:
+
+```bash
+docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, patente, estado, \"validacionPatente\", \"validacionTitularidad\" FROM vehiculos_externos ORDER BY id;"
+```
+
+### Mantenimiento preventivo
+
+1. Entrá con el cliente demo y hacé una reserva desde **Consultar
+   Disponibilidad**. Se confirma al instante.
+2. Unos segundos después, el resultado del mantenimiento queda guardado en la
+   reserva. Para verlo:
+
+   ```bash
+   docker compose exec rental_db psql -U rental -d rental_db -c "SELECT id, vehiculo_id, estado, mantenimiento_resultado FROM reservas ORDER BY id DESC LIMIT 5;"
+   ```
+
+El resultado es `REALIZADO` por defecto. Para probar el caso `NO_REALIZADO`,
+cambiá `RESULTADO_MANTENIMIENTO` en el servicio `mantenimiento_service` de
+`docker-compose.yml` y aplicalo con `docker compose up -d mantenimiento_service`
+(un `restart` no toma los cambios de variables).
+
+## Para el equipo de desarrollo
+
+### Hot reload
+
+El backend y el frontend corren con su código montado dentro de los
+contenedores, así que los cambios se ven al instante sin reconstruir nada.
+
+Los servicios Python también tienen su código montado, pero no se recargan
+solos: después de modificar un `server.py` hay que reiniciar ese servicio
+(`docker compose restart <servicio>`). Si cambia un `requirements.txt`, hay que
+reconstruir su imagen.
+
+### Estructura del repo
 
 ```
 .
 ├── backend/                     # API Gateway (NestJS, REST + GraphQL)
 ├── services/
-│   ├── vehicle-service/         # Vehicle Service (Python, gRPC)
-│   ├── customer-service/        # Customer Service (Python, gRPC)
-│   ├── rental-service/          # Rental Service (Python, gRPC)
-│   └── registros-service/       # Registros externos simulados (Python, solo eventos)
+│   ├── customer-service/        # Clientes (Python, gRPC)
+│   ├── vehicle-service/         # Vehículos (Python, gRPC + eventos)
+│   ├── rental-service/          # Reservas (Python, gRPC + eventos)
+│   ├── registros-service/       # Registros policial y automotor simulados (Python, eventos)
+│   └── mantenimiento-service/   # Mantenimiento preventivo (Python, eventos)
 ├── proto/                       # Contratos gRPC (.proto) de los 3 dominios
 ├── eventos/                     # Contratos de eventos y cliente RabbitMQ compartido
 ├── frontend/                    # React + Vite
@@ -213,119 +416,8 @@ después de modificar un `server.py` hay que reiniciar el servicio. Si cambia un
 └── README.md
 ```
 
-## Organización del equipo
+### Forma de trabajo
 
-### Hito 1 (completo)
-
-Cada funcionalidad se desarrolló en su propia rama feature a partir de `desarrollo`:
-
-- Gestión de vehículos (ABM) → REST
-- Gestión de clientes (ABM) → REST
-- Alta y cancelación de reservas → REST
-- Consulta de disponibilidad de vehículos (con filtros) → GraphQL
-- Consulta de reservas (con filtros) → GraphQL
-- Historial de alquileres → GraphQL
-
-### Hito 2 — RPC
-
-Arquitectura pedida: Interfaz web → **API Gateway** (REST/GraphQL) → **gRPC** → 3
-microservicios de dominio (Vehículos, Clientes, Reservas), cada uno en un
-lenguaje distinto al del Gateway, con contratos `.proto` documentados.
-
-Estado por punto de la consigna:
-
-| Punto | Estado | Detalle |
-|---|---|---|
-| 1. API Gateway | ✅ Implementado | Es el punto de entrada REST/GraphQL. El ABM de clientes y vehículos, las reservas, las consultas y el historial se atienden a través del Gateway; sus operaciones de dominio llaman los servicios internos por gRPC. |
-| 2. Vehicle Service (gRPC) | ✅ Implementado | `services/vehicle-service/` implementa el ABM, las consultas y los filtros propios de vehículos. Rental Service informa la ocupación temporal y el Gateway compone la disponibilidad. |
-| 3. Customer Service (gRPC) | ✅ Implementado | `services/customer-service/` implementa el ABM, las consultas y las verificaciones de existencia y estado activo en Python. |
-| 4. Rental Service (gRPC) | ✅ Implementado | `services/rental-service/` implementa creación, consulta, cancelación de reservas e historial en Python. |
-| Contratos gRPC | ✅ Implementados | Los contratos de los tres dominios están en `proto/vehiculos.proto`, `proto/clientes.proto` y `proto/reservas.proto`. |
-| Coordinación entre servicios | ✅ Implementada | Rental Service valida cliente y vehículo mediante gRPC antes de crear una reserva. El Gateway combina los filtros de Vehicle Service con la ocupación informada por Rental Service. |
-
-**Arquitectura actual:** el Gateway no accede a ninguna base de datos. Cada servicio Python posee una base PostgreSQL y credenciales independientes; las referencias entre dominios se guardan como identificadores y se validan mediante gRPC. Rental DB impide atómicamente reservas superpuestas con una restricción `EXCLUDE` de PostgreSQL.
-
-### Hito 3 — Procesamiento Asíncrono (RabbitMQ)
-
-#### Hito 3 - P3: Alta de Vehículos de Propietarios Externos
-
-Permite a los clientes registrados en la plataforma dar de alta sus propios vehículos para que sean incorporados al catálogo de alquiler de Rentar tras ser validados policial y legalmente de manera asíncrona.
-
-##### 1. Resumen de la Arquitectura y Componentes Desarrollados
-
-- **Frontend (React + Vite):**
-  - **Nueva vista [`PublicarVehiculo.jsx`](frontend/src/pages/PublicarVehiculo.jsx):** Ruta `/cliente/publicar-vehiculo` protegida para el rol `CLIENTE`.
-  - **Acceso integrado:** Tarjeta "Ofrecer mi Vehículo" en el dashboard del cliente ([`HomeClientes.jsx`](frontend/src/pages/HomeClientes.jsx)) con dos accesos: publicar un vehículo y ver los ya ofrecidos. Como el resto de las secciones del cliente, no se repite en la barra superior.
-  - **Formulario de carga:** Permite ingresar Patente, Tipo de vehículo (`SEDAN`, `SUV`, `PICKUP`, `COUPE`, `HATCHBACK`), Marca, Modelo, Año, Color y Precio Diario.
-  - **Gestión de estados:** Bloqueo de controles y estado de carga (`loading`) durante la solicitud; alertas claras de confirmación indicando el estado **"Pendiente de validación"** y carteles de error ante respuestas fallidas.
-  - **Servicio:** Función `registrarVehiculoExterno(datos)` en [`vehiculos.service.js`](frontend/src/services/vehiculos.service.js) que se comunica con el Gateway enviando el JWT correspondiente.
-  - **Vista [`MisVehiculosOfrecidos.jsx`](frontend/src/pages/MisVehiculosOfrecidos.jsx):** Ruta `/cliente/mis-vehiculos`. Lista las solicitudes del cliente con el resultado de cada validación (patente y titularidad), el estado final y el motivo de un rechazo. Mientras haya solicitudes pendientes vuelve a consultar cada 2 segundos, así se ve el procesamiento asíncrono en vivo.
-
-- **API Gateway (NestJS):**
-  - **Controlador [`VehiculosExternosController`](backend/src/vehiculos/vehiculos-externos.controller.ts):** Expone `POST /vehiculos/externos` (alta) y `GET /vehiculos/externos` (solicitudes del cliente autenticado, vía el RPC `ListarVehiculosExternos`). Una validación que todavía no llegó se devuelve como `PENDIENTE`.
-  - **Seguridad perimetral:** Protegido con `@UseGuards(JwtAuthGuard, RolesGuard)` y rol exigido `@Roles(RolUsuario.CLIENTE)`.
-  - **Inyección segura de identidad:** El ID del cliente no se toma del body del request para prevenir suplantación de identidad (spoofing); se inyecta de forma garantizada desde el payload del JWT firmado mediante `@CurrentUser() user: AuthenticatedUser`.
-  - **Validación DTO:** Implementada en [`CreateVehiculoExternoDto`](backend/src/vehiculos/dto/create-vehiculo-externo.dto.ts) y tipada en [`VehiculoExternoResponseDto`](backend/src/vehiculos/dto/vehiculo-externo-response.dto.ts) con decoradores de `class-validator` y `class-transformer`.
-  - **Cliente gRPC:** Tipado en [`vehiculo-grpc.interface.ts`](backend/src/vehiculos/grpc/vehiculo-grpc.interface.ts) y consumido vía `lastValueFrom()`, mapeando el estado de gRPC `ALREADY_EXISTS` a una excepción HTTP 409 Conflict.
-
-- **Vehicle Service (Python + gRPC + SQLAlchemy):**
-  - **Tabla `vehiculos_externos` en `vehicle_db`:** Modelo persistente que almacena la solicitud con campos `id`, `clienteId`, `patente`, `marca`, `modelo`, `anio`, `color`, `tipoVehiculo`, `precioDiario`, `estado` (iniciado en `'PENDIENTE'`), `creadoEn` y `actualizadoEn`.
-  - **Método gRPC `RegistrarVehiculoExterno`:** Valida que la patente no esté dada de alta en `vehiculos` ni exista ya una solicitud en trámite (`'PENDIENTE'` o `'APROBADO'`) en `vehiculos_externos`. Inserta el registro y, tras el commit, dispara el evento hacia RabbitMQ.
-  - **Publicación asíncrona:** Publica en RabbitMQ (`rentar.eventos`) el evento `vehiculos.externos.registrados`.
-  - **Consumidor asíncrono (`vehiculos.externos-completada`):** Consume en segundo plano el evento `vehiculos.externos.validacion.completada` emitido por el correlador. Al recibirlo, promueve atómicamente la solicitud a estado `'APROBADO'` e inserta el vehículo en la tabla `vehiculos` con `estado = 'DISPONIBLE'`, `verificacion = 'VALIDADO'` y `activo = true` (utilizando `ON CONFLICT (patente) DO NOTHING` para garantizar idempotencia ante reentregas de mensajes). Ignora el evento si la solicitud no tiene las dos validaciones en `VALIDADO`, así un evento publicado a mano no puede incorporar un vehículo rechazado.
-
-- **Validaciones (Registros Service):** Consume `vehiculos.externos.registrados` desde dos colas independientes, cada una en su propio hilo:
-  - **Patente (`registros.externos-patente`):** busca la patente en `patentes_robadas` y publica `vehiculos.externos.validacion.patente` con `RECHAZADO` si está denunciada o `VALIDADO` si no.
-  - **Titularidad (`registros.externos-titularidad`):** pide el documento del cliente a Customer Service por gRPC (`ObtenerCliente`) y lo compara con el titular de la patente en la tabla `titularidades` (registro automotor simulado). Publica `vehiculos.externos.validacion.titularidad` con `VALIDADO` solo si coinciden.
-
-- **Correlador (Vehicle Service, cola `vehiculos.externos-validaciones`):** Recibe los dos resultados, que pueden llegar en cualquier orden, y los guarda en las columnas `validacionPatente` y `validacionTitularidad` de `vehiculos_externos`, usando `vehiculoExternoId` como identificador del proceso. Si llega un `RECHAZADO`, la solicitud pasa a `RECHAZADO` y el vehículo no se incorpora. Si los dos son `VALIDADO`, publica `vehiculos.externos.validacion.completada`. Bloquea la fila con `SELECT ... FOR UPDATE` para que dos resultados simultáneos no se pisen, y un resultado repetido no cambia una decisión ya tomada.
-
-- **Reintento al arrancar:** Vehicle Service retoma las solicitudes `PENDIENTE` cuyo evento pudo perderse si RabbitMQ no estaba disponible: vuelve a publicar `completada` si ya tienen las dos validaciones, o `registrados` si les falta alguna.
-
-##### 2. Contratos de Eventos RabbitMQ Asociados
-
-* **Evento Producido por P3 (Consumido por P4 / Registros Service):**
-  * **Nombre / Routing Key:** `vehiculos.externos.registrados`
-  * **Destinos (Colas):** `registros.externos-patente` y `registros.externos-titularidad`.
-  * **Payload:**
-    ```json
-    {
-      "vehiculoExternoId": 1,
-      "clienteId": 2,
-      "patente": "AD777EX"
-    }
-    ```
-
-* **Eventos de resultado (Producidos por Registros Service, consumidos por el correlador):**
-  * `vehiculos.externos.validacion.patente` y `vehiculos.externos.validacion.titularidad`, ambos a la cola `vehiculos.externos-validaciones`.
-
-* **Evento de cierre (Producido por el correlador, consumido por Vehicle Service):**
-  * **Nombre / Routing Key:** `vehiculos.externos.validacion.completada`
-  * **Cola:** `vehiculos.externos-completada`
-
-El detalle de cada payload está en [`eventos/README.md`](eventos/README.md).
-
-##### 3. Guía de Pruebas y Comandos de Verificación
-
-1. **Alta desde el Frontend:**
-   - Iniciar sesión en http://localhost:5173/login con el usuario cliente demo (`mfernandez@gmail.com` / `ClienteRentar2026!`).
-   - Ir a **"Ofrecer mi Vehículo"** (`/cliente/publicar-vehiculo`), completar los campos con la patente `AD777EX` y publicar.
-   - Verificar la alerta verde confirmando el registro en estado **"Pendiente de validación"**.
-
-2. **Esperar las validaciones:** a los pocos segundos la solicitud se resuelve sola. Para probar los rechazos, usar las patentes `AF789RB` (denunciada) o `AG555EX` (de otro titular).
-
-3. **Verificación en la Base de Datos (`vehicle_db`):**
-   - Ejecutar consultas vía `psql` directo en el contenedor para corroborar ambas tablas con el usuario `vehicle`:
-     ```bash
-     # 1. Verificar que la solicitud en vehiculos_externos pasó a estado APROBADO, con sus dos validaciones:
-     docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, \"clienteId\", patente, estado, \"validacionPatente\", \"validacionTitularidad\" FROM vehiculos_externos WHERE patente = 'AD777EX';"
-
-     # 2. Verificar que el vehículo fue insertado en vehiculos con estado DISPONIBLE y verificacion VALIDADO:
-     docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, patente, marca, modelo, \"tipoVehiculo\", \"precioDiario\", estado, verificacion, activo FROM vehiculos WHERE patente = 'AD777EX';"
-     ```
-   - O bien corroborar desde Adminer en http://localhost:8080 (Servidor: `vehicle_db`, Usuario: `vehicle`, Contraseña: `vehicle`, Base: `vehicle_db`).
-
-##### 4. Nota de Diseño / Consideración Técnica
-
-- **Integración transparente en el catálogo:** Una vez que la validación se completa y el vehículo es promovido a la tabla `vehiculos` con estado `DISPONIBLE`, se acopla inmediatamente al flujo general de Rentar: es retornado por el API Gateway en las consultas de disponibilidad y queda listo para ser reservado por cualquier usuario.
-- **Mejora futura:** Actualmente el modelo operativo permite que cualquier cliente reserve el vehículo una vez disponible. Se plantea como mejora futura incorporar una regla de negocio en el Gateway o Rental Service para restringir que el mismo cliente titular que dio de alta el vehículo externo pueda reservarlo.
+Cada funcionalidad se desarrolla en su propia rama a partir de `desarrollo` y
+entra por pull request. Al cerrar cada hito, `desarrollo` se mergea a `main` y
+se marca el tag de la entrega (`hito-1`, `hito-2`, `hito-3`).
