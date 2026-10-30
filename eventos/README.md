@@ -127,13 +127,21 @@ cualquier otra da `VALIDADO`. La consulta tiene una demora simulada de 3 s
 ```
 
 - **Correlación:** `vehiculoExternoId` identifica el proceso de incorporación.
-  El correlador anota cada resultado en `vehiculos_externos`. Si llega un
-  `RECHAZADO`, marca la solicitud como rechazada y no publica nada más. Si ya
-  tiene los dos `VALIDADO`, publica `completada`. Los resultados pueden
-  llegar en cualquier orden.
+  El correlador anota cada resultado en las columnas `validacionPatente` y
+  `validacionTitularidad` de `vehiculos_externos`. Si llega un `RECHAZADO`,
+  marca la solicitud como rechazada y no publica nada más. Si ya tiene los
+  dos `VALIDADO`, publica `completada`. Los resultados pueden llegar en
+  cualquier orden. Un resultado que llega después de la decisión se guarda
+  para dejar constancia, pero no la cambia.
 - **Documento:** el registro de titularidad recibe `clienteId` y obtiene el
   documento pidiéndoselo por gRPC a customer-service, para poder compararlo
-  con el titular de la patente.
+  con el titular de la patente. Si el cliente no existe, o la patente no
+  figura en `titularidades`, el resultado es `RECHAZADO`.
+- **`completada` solo incorpora lo aprobado:** su consumidor verifica que la
+  solicitud tenga las dos validaciones en `VALIDADO`; si no, ignora el evento.
+- **Datos de prueba** (cliente demo, documento `32619541`): `AD777EX` y
+  `AE888EX` se aprueban; `AF789RB` está denunciada; `AG555EX` es de otro
+  titular.
 
 ### Mantenimiento preventivo
 
@@ -206,6 +214,9 @@ base.
 Los `init.sql` solo corren cuando el volumen de la base es nuevo. Después de
 traer un cambio de esquema hay que regenerar las bases con
 `docker compose down -v` (borra los datos y los seeds los vuelven a cargar).
+Excepción: `registros-service` y `vehicle-service` vuelven a aplicar su
+`init.sql` (y registros también su seed) al arrancar, porque son idempotentes;
+así una base vieja recibe `titularidades` y `vehiculos_externos` sin borrarla.
 
 ## Reglas para consumidores
 

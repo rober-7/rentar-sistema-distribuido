@@ -8,6 +8,7 @@ import ConsultarDisponibilidad from "./pages/ConsultarDisponibilidad";
 import MisReservas from "./pages/MisReservas";
 import HistorialAlquileres from "./pages/HistorialAlquileres";
 import PublicarVehiculo from "./pages/PublicarVehiculo";
+import MisVehiculosOfrecidos from "./pages/MisVehiculosOfrecidos";
 import Login from "./pages/Login";
 import ProtectedRoute from "./components/ProtectedRoute";
 const admin = (x) => <ProtectedRoute roles={["ADMIN"]}>{x}</ProtectedRoute>,
@@ -34,6 +35,10 @@ export default function App() {
         <Route
           path="/cliente/publicar-vehiculo"
           element={cliente(<PublicarVehiculo />)}
+        />
+        <Route
+          path="/cliente/mis-vehiculos"
+          element={cliente(<MisVehiculosOfrecidos />)}
         />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

@@ -78,6 +78,13 @@ export default function HomeCliente() {
                 >
                   Publicar Vehículo
                 </Button>
+                <Button
+                  variant="outline-info"
+                  className="d-block mx-auto mt-2"
+                  onClick={() => navigate("/cliente/mis-vehiculos")}
+                >
+                  Mis Vehículos Ofrecidos
+                </Button>
               </Card.Body>
             </Card>
           </Col>

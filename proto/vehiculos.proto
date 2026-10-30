@@ -53,6 +53,11 @@ service VehiculoService {
   // Requiere: ID del cliente (propietario) y datos del vehículo.
   // Devuelve: El estado del trámite (PENDIENTE) y publica el evento para su validación asíncrona.
   rpc RegistrarVehiculoExterno(RegistrarVehiculoExternoRequest) returns (VehiculoExternoResponse);
+
+  // Lista las solicitudes de vehículos externos de un cliente, de la más nueva a la más vieja.
+  // Requiere: ID del cliente (lo inyecta el Gateway desde el JWT).
+  // Devuelve: Cada solicitud con su estado y el resultado de cada validación asíncrona.
+  rpc ListarVehiculosExternos(ListarVehiculosExternosRequest) returns (ListarVehiculosExternosResponse);
 }
 
 // Categorías de carrocería permitidas por la plataforma.
@@ -185,4 +190,19 @@ message VehiculoExternoResponse {
   EstadoVehiculoExterno estado = 10;
   string creado_en = 11;
   string actualizado_en = 12;
+  // Resultado de cada validación: "VALIDADO" o "RECHAZADO"; se omite
+  // mientras no llegó. Es string y no enum porque en proto3 los valores de
+  // enum comparten espacio de nombres y VALIDADO/RECHAZADO ya están usados.
+  optional string validacion_patente = 13;
+  optional string validacion_titularidad = 14;
+}
+
+// Petición para listar las solicitudes de vehículos externos de un cliente.
+message ListarVehiculosExternosRequest {
+  int32 cliente_id = 1;
+}
+
+// Solicitudes de vehículos externos de un cliente.
+message ListarVehiculosExternosResponse {
+  repeated VehiculoExternoResponse vehiculos = 1;
 }

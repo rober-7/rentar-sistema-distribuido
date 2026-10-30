@@ -72,6 +72,8 @@ export interface VehiculoExternoGrpc {
   estado: string;
   creadoEn: string;
   actualizadoEn: string;
+  validacionPatente?: string;
+  validacionTitularidad?: string;
 }
 
 export interface VehiculoServiceGrpcClient {
@@ -89,4 +91,7 @@ export interface VehiculoServiceGrpcClient {
   registrarVehiculoExterno(
     data: RegistrarVehiculoExternoGrpcRequest,
   ): Observable<VehiculoExternoGrpc>;
+  listarVehiculosExternos(data: {
+    clienteId: number;
+  }): Observable<{ vehiculos?: VehiculoExternoGrpc[] }>;
 }

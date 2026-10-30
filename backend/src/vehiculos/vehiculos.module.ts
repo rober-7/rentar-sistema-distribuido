@@ -12,6 +12,8 @@ import { rentalGrpcClientOptions } from '../reservas/rental.grpc-client';
       rentalGrpcClientOptions(),
     ]),
   ],
+  // El orden importa: GET /vehiculos/externos tiene que registrarse antes que
+  // GET /vehiculos/:id, o "externos" se interpretaría como un id.
   controllers: [VehiculosExternosController, VehiculosController],
 })
 export class VehiculosModule {}

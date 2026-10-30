@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Get,
   Inject,
   InternalServerErrorException,
   OnModuleInit,
@@ -29,11 +30,33 @@ import {
   VehiculoServiceGrpcClient,
 } from './grpc/vehiculo-grpc.interface';
 import { CreateVehiculoExternoDto } from './dto/create-vehiculo-externo.dto';
-import { VehiculoExternoResponseDto } from './dto/vehiculo-externo-response.dto';
+import {
+  ResultadoValidacionExterno,
+  VehiculoExternoResponseDto,
+} from './dto/vehiculo-externo-response.dto';
 import {
   grpcErrorMessage,
   isGrpcServiceError,
 } from '../common/grpc/grpc-error';
+
+/**
+ * Vehicle Service omite cada validación mientras su resultado no llegó por
+ * RabbitMQ; la API lo expone explícito como PENDIENTE.
+ */
+function resultadoValidacion(valor?: string): ResultadoValidacionExterno {
+  return valor === ResultadoValidacionExterno.VALIDADO ||
+    valor === ResultadoValidacionExterno.RECHAZADO
+    ? valor
+    : ResultadoValidacionExterno.PENDIENTE;
+}
+
+function conValidaciones(externo: VehiculoExternoGrpc): VehiculoExternoGrpc {
+  return {
+    ...externo,
+    validacionPatente: resultadoValidacion(externo.validacionPatente),
+    validacionTitularidad: resultadoValidacion(externo.validacionTitularidad),
+  };
+}
 
 @ApiTags('Vehiculos Externos')
 @ApiBearerAuth()
@@ -87,12 +110,13 @@ export class VehiculosExternosController implements OnModuleInit {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<VehiculoExternoGrpc> {
     try {
-      return await lastValueFrom(
+      const externo = await lastValueFrom(
         this.vehiculoGrpcService.registrarVehiculoExterno({
           ...createDto,
           clienteId: user.id,
         }),
       );
+      return conValidaciones(externo);
     } catch (error) {
       if (
         isGrpcServiceError(error) &&
@@ -109,5 +133,34 @@ export class VehiculosExternosController implements OnModuleInit {
       );
     }
   }
-}
 
+  @Get()
+  @ApiOperation({
+    summary:
+      'Lista las solicitudes de vehículos externos del cliente autenticado con su estado y el resultado de cada validación',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Solicitudes del cliente, de la más nueva a la más vieja',
+    type: [VehiculoExternoResponseDto],
+  })
+  async findMine(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<VehiculoExternoGrpc[]> {
+    // Igual que en el alta, el clienteId sale del JWT: cada cliente solo ve
+    // sus propias solicitudes.
+    try {
+      const { vehiculos } = await lastValueFrom(
+        this.vehiculoGrpcService.listarVehiculosExternos({
+          clienteId: user.id,
+        }),
+      );
+      return (vehiculos ?? []).map(conValidaciones);
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Vehicle Service no pudo completar ListarVehiculosExternos: ' +
+          grpcErrorMessage(error),
+      );
+    }
+  }
+}

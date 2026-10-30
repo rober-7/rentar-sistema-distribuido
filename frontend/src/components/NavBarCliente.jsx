@@ -17,12 +17,6 @@ export default function NavBarCliente() {
         </Link>
         {user && (
           <div className="d-flex align-items-center text-light small">
-            <Link
-              className="btn btn-outline-info btn-sm me-3"
-              to="/cliente/publicar-vehiculo"
-            >
-              Publicar Vehículo
-            </Link>
             <span className="me-3">{user.email}</span>
             <button
               type="button"

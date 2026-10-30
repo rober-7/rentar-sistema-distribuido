@@ -110,11 +110,18 @@ export default function PublicarVehiculo() {
                   </strong>{" "}
                   quedó en estado <strong>Pendiente de validación</strong>.
                 </p>
-                <small className="text-muted">
-                  Una vez que se completen las validaciones de patente y
-                  titularidad, tu vehículo pasará automáticamente a estado{" "}
-                  <strong>DISPONIBLE</strong>.
+                <small className="text-muted d-block mb-2">
+                  Ahora se validan en segundo plano la patente y la
+                  titularidad. Si las dos se aprueban, tu vehículo pasará
+                  automáticamente a estado <strong>DISPONIBLE</strong>.
                 </small>
+                <Button
+                  variant="success"
+                  size="sm"
+                  onClick={() => navigate("/cliente/mis-vehiculos")}
+                >
+                  Seguir el resultado
+                </Button>
               </Alert>
             )}
 

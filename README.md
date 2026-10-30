@@ -154,17 +154,29 @@ http://localhost:15672 (usuario `rentar`, contraseña `rentar`).
    Para probar el alta y el circuito asíncrono de un vehículo externo:
 
    1. Ingresá al Frontend (http://localhost:5173/login) con el cliente demo (`mfernandez@gmail.com` / `ClienteRentar2026!`).
-   2. Hacé clic en **"Ofrecer mi Vehículo"** (en el Home o en la barra superior).
+   2. En el Home, hacé clic en **"Publicar Vehículo"** dentro de la tarjeta **"Ofrecer mi Vehículo"**.
    3. Completá el formulario (ej. Patente `AD777EX`, Toyota Corolla 2023, Sedán, $32.000) y hacé clic en **"Publicar Vehículo"**.
    4. El sistema confirmará el registro en estado **"Pendiente de validación"** y publicará en RabbitMQ el evento `vehiculos.externos.registrados`.
-   5. Para simular la resolución exitosa de las validaciones policiales y de titularidad (emitidas por el correlador de P4), ejecutá:
+   5. Registros Service valida la patente y la titularidad en paralelo (unos 3 segundos cada una) y el correlador de Vehicle Service junta los dos resultados. No hace falta hacer nada a mano.
+   6. Hacé clic en **"Seguir el resultado"** (o en **"Mis Vehículos Ofrecidos"** desde la tarjeta del Home). La pantalla `/cliente/mis-vehiculos` muestra cada solicitud con el resultado de las dos validaciones y se actualiza sola cada 2 segundos mientras haya alguna pendiente.
+   7. Si las dos validaciones dan `VALIDADO`, la solicitud pasa a `APROBADO` y el auto entra a la tabla `vehiculos` con estado `DISPONIBLE` y `verificacion = VALIDADO`. Al entrar a **Consultar Disponibilidad**, ya aparece para reservar.
 
-      ```bash
-      docker compose exec vehicle_service python -c "from eventos import broker; broker.publicar('vehiculos.externos.validacion.completada', {'vehiculoExternoId': 1})"
-      ```
+   El seed carga estas patentes para probar cada caso con el cliente demo:
 
-   6. Vehicle Service consumirá el evento, marcará la solicitud como `APROBADO` e ingresará el auto en la tabla `vehiculos` con estado `DISPONIBLE` y `verificacion = VALIDADO`.
-   7. Al entrar a **Consultar Disponibilidad** en el Frontend, el auto ya aparecerá listado y disponible para reservar.
+   | Patente | Patente | Titularidad | Resultado |
+   |---|---|---|---|
+   | `AD777EX`, `AE888EX` | `VALIDADO` | `VALIDADO` | `APROBADO`, se incorpora como `DISPONIBLE` |
+   | `AF789RB` | `RECHAZADO` (denunciada) | `VALIDADO` | `RECHAZADO` |
+   | `AG555EX` | `VALIDADO` | `RECHAZADO` (es de otra persona) | `RECHAZADO` |
+   | cualquier otra | `VALIDADO` | `RECHAZADO` (no figura en el registro) | `RECHAZADO` |
+
+   Para ver el resultado de cada validación:
+
+   ```bash
+   docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, patente, estado, \"validacionPatente\", \"validacionTitularidad\" FROM vehiculos_externos ORDER BY id;"
+   ```
+
+   Una patente rechazada se puede volver a enviar: el control de duplicados solo bloquea solicitudes `PENDIENTE` o `APROBADO`.
 
 5. Para bajar todo: `Ctrl+C` en la terminal donde quedó corriendo, y después:
 
@@ -243,13 +255,14 @@ Permite a los clientes registrados en la plataforma dar de alta sus propios veh�
 
 - **Frontend (React + Vite):**
   - **Nueva vista [`PublicarVehiculo.jsx`](frontend/src/pages/PublicarVehiculo.jsx):** Ruta `/cliente/publicar-vehiculo` protegida para el rol `CLIENTE`.
-  - **Acceso integrado:** Nueva tarjeta destacada en el dashboard del cliente ([`HomeClientes.jsx`](frontend/src/pages/HomeClientes.jsx)) y botón de navegación en la barra superior ([`NavBarCliente.jsx`](frontend/src/components/NavBarCliente.jsx)).
+  - **Acceso integrado:** Tarjeta "Ofrecer mi Vehículo" en el dashboard del cliente ([`HomeClientes.jsx`](frontend/src/pages/HomeClientes.jsx)) con dos accesos: publicar un vehículo y ver los ya ofrecidos. Como el resto de las secciones del cliente, no se repite en la barra superior.
   - **Formulario de carga:** Permite ingresar Patente, Tipo de vehículo (`SEDAN`, `SUV`, `PICKUP`, `COUPE`, `HATCHBACK`), Marca, Modelo, Año, Color y Precio Diario.
   - **Gestión de estados:** Bloqueo de controles y estado de carga (`loading`) durante la solicitud; alertas claras de confirmación indicando el estado **"Pendiente de validación"** y carteles de error ante respuestas fallidas.
   - **Servicio:** Función `registrarVehiculoExterno(datos)` en [`vehiculos.service.js`](frontend/src/services/vehiculos.service.js) que se comunica con el Gateway enviando el JWT correspondiente.
+  - **Vista [`MisVehiculosOfrecidos.jsx`](frontend/src/pages/MisVehiculosOfrecidos.jsx):** Ruta `/cliente/mis-vehiculos`. Lista las solicitudes del cliente con el resultado de cada validación (patente y titularidad), el estado final y el motivo de un rechazo. Mientras haya solicitudes pendientes vuelve a consultar cada 2 segundos, así se ve el procesamiento asíncrono en vivo.
 
 - **API Gateway (NestJS):**
-  - **Controlador [`VehiculosExternosController`](backend/src/vehiculos/vehiculos-externos.controller.ts):** Expone el endpoint `POST /vehiculos/externos`.
+  - **Controlador [`VehiculosExternosController`](backend/src/vehiculos/vehiculos-externos.controller.ts):** Expone `POST /vehiculos/externos` (alta) y `GET /vehiculos/externos` (solicitudes del cliente autenticado, vía el RPC `ListarVehiculosExternos`). Una validación que todavía no llegó se devuelve como `PENDIENTE`.
   - **Seguridad perimetral:** Protegido con `@UseGuards(JwtAuthGuard, RolesGuard)` y rol exigido `@Roles(RolUsuario.CLIENTE)`.
   - **Inyección segura de identidad:** El ID del cliente no se toma del body del request para prevenir suplantación de identidad (spoofing); se inyecta de forma garantizada desde el payload del JWT firmado mediante `@CurrentUser() user: AuthenticatedUser`.
   - **Validación DTO:** Implementada en [`CreateVehiculoExternoDto`](backend/src/vehiculos/dto/create-vehiculo-externo.dto.ts) y tipada en [`VehiculoExternoResponseDto`](backend/src/vehiculos/dto/vehiculo-externo-response.dto.ts) con decoradores de `class-validator` y `class-transformer`.
@@ -259,7 +272,15 @@ Permite a los clientes registrados en la plataforma dar de alta sus propios veh�
   - **Tabla `vehiculos_externos` en `vehicle_db`:** Modelo persistente que almacena la solicitud con campos `id`, `clienteId`, `patente`, `marca`, `modelo`, `anio`, `color`, `tipoVehiculo`, `precioDiario`, `estado` (iniciado en `'PENDIENTE'`), `creadoEn` y `actualizadoEn`.
   - **Método gRPC `RegistrarVehiculoExterno`:** Valida que la patente no esté dada de alta en `vehiculos` ni exista ya una solicitud en trámite (`'PENDIENTE'` o `'APROBADO'`) en `vehiculos_externos`. Inserta el registro y, tras el commit, dispara el evento hacia RabbitMQ.
   - **Publicación asíncrona:** Publica en RabbitMQ (`rentar.eventos`) el evento `vehiculos.externos.registrados`.
-  - **Consumidor asíncrono (`vehiculos.externos-completada`):** Consume en segundo plano el evento `vehiculos.externos.validacion.completada` emitido por el correlador de P4. Al recibirlo, promueve atómicamente la solicitud a estado `'APROBADO'` e inserta el vehículo en la tabla `vehiculos` con `estado = 'DISPONIBLE'`, `verificacion = 'VALIDADO'` y `activo = true` (utilizando `ON CONFLICT (patente) DO NOTHING` para garantizar idempotencia ante reentregas de mensajes).
+  - **Consumidor asíncrono (`vehiculos.externos-completada`):** Consume en segundo plano el evento `vehiculos.externos.validacion.completada` emitido por el correlador. Al recibirlo, promueve atómicamente la solicitud a estado `'APROBADO'` e inserta el vehículo en la tabla `vehiculos` con `estado = 'DISPONIBLE'`, `verificacion = 'VALIDADO'` y `activo = true` (utilizando `ON CONFLICT (patente) DO NOTHING` para garantizar idempotencia ante reentregas de mensajes). Ignora el evento si la solicitud no tiene las dos validaciones en `VALIDADO`, así un evento publicado a mano no puede incorporar un vehículo rechazado.
+
+- **Validaciones (Registros Service):** Consume `vehiculos.externos.registrados` desde dos colas independientes, cada una en su propio hilo:
+  - **Patente (`registros.externos-patente`):** busca la patente en `patentes_robadas` y publica `vehiculos.externos.validacion.patente` con `RECHAZADO` si está denunciada o `VALIDADO` si no.
+  - **Titularidad (`registros.externos-titularidad`):** pide el documento del cliente a Customer Service por gRPC (`ObtenerCliente`) y lo compara con el titular de la patente en la tabla `titularidades` (registro automotor simulado). Publica `vehiculos.externos.validacion.titularidad` con `VALIDADO` solo si coinciden.
+
+- **Correlador (Vehicle Service, cola `vehiculos.externos-validaciones`):** Recibe los dos resultados, que pueden llegar en cualquier orden, y los guarda en las columnas `validacionPatente` y `validacionTitularidad` de `vehiculos_externos`, usando `vehiculoExternoId` como identificador del proceso. Si llega un `RECHAZADO`, la solicitud pasa a `RECHAZADO` y el vehículo no se incorpora. Si los dos son `VALIDADO`, publica `vehiculos.externos.validacion.completada`. Bloquea la fila con `SELECT ... FOR UPDATE` para que dos resultados simultáneos no se pisen, y un resultado repetido no cambia una decisión ya tomada.
+
+- **Reintento al arrancar:** Vehicle Service retoma las solicitudes `PENDIENTE` cuyo evento pudo perderse si RabbitMQ no estaba disponible: vuelve a publicar `completada` si ya tienen las dos validaciones, o `registrados` si les falta alguna.
 
 ##### 2. Contratos de Eventos RabbitMQ Asociados
 
@@ -275,30 +296,29 @@ Permite a los clientes registrados en la plataforma dar de alta sus propios veh�
     }
     ```
 
-* **Evento Consumido por P3 (Producido por el Correlador de P4):**
+* **Eventos de resultado (Producidos por Registros Service, consumidos por el correlador):**
+  * `vehiculos.externos.validacion.patente` y `vehiculos.externos.validacion.titularidad`, ambos a la cola `vehiculos.externos-validaciones`.
+
+* **Evento de cierre (Producido por el correlador, consumido por Vehicle Service):**
   * **Nombre / Routing Key:** `vehiculos.externos.validacion.completada`
   * **Cola:** `vehiculos.externos-completada`
-  * **Payload desde la terminal:** docker compose exec vehicle_service python -c "from eventos import broker; broker.publicar('vehiculos.externos.validacion.completada', {'vehiculoExternoId': 1})"
-    
+
+El detalle de cada payload está en [`eventos/README.md`](eventos/README.md).
 
 ##### 3. Guía de Pruebas y Comandos de Verificación
 
 1. **Alta desde el Frontend:**
    - Iniciar sesión en http://localhost:5173/login con el usuario cliente demo (`mfernandez@gmail.com` / `ClienteRentar2026!`).
-   - Ir a **"Ofrecer mi Vehículo"** (`/cliente/publicar-vehiculo`), completar los campos y publicar.
+   - Ir a **"Ofrecer mi Vehículo"** (`/cliente/publicar-vehiculo`), completar los campos con la patente `AD777EX` y publicar.
    - Verificar la alerta verde confirmando el registro en estado **"Pendiente de validación"**.
 
-2. **Simular Aprobación desde la Terminal (Evento del correlador de P4):**
-   - Publicar el evento de validación completada utilizando el cliente broker de Python:
-     ```bash
-     docker compose exec vehicle_service python -c "from eventos import broker; broker.publicar('vehiculos.externos.validacion.completada', {'vehiculoExternoId': 1})"
-     ```
+2. **Esperar las validaciones:** a los pocos segundos la solicitud se resuelve sola. Para probar los rechazos, usar las patentes `AF789RB` (denunciada) o `AG555EX` (de otro titular).
 
 3. **Verificación en la Base de Datos (`vehicle_db`):**
    - Ejecutar consultas vía `psql` directo en el contenedor para corroborar ambas tablas con el usuario `vehicle`:
      ```bash
-     # 1. Verificar que la solicitud en vehiculos_externos pasó a estado APROBADO:
-     docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, \"clienteId\", patente, marca, modelo, estado, \"actualizadoEn\" FROM vehiculos_externos WHERE id = 1;"
+     # 1. Verificar que la solicitud en vehiculos_externos pasó a estado APROBADO, con sus dos validaciones:
+     docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, \"clienteId\", patente, estado, \"validacionPatente\", \"validacionTitularidad\" FROM vehiculos_externos WHERE patente = 'AD777EX';"
 
      # 2. Verificar que el vehículo fue insertado en vehiculos con estado DISPONIBLE y verificacion VALIDADO:
      docker compose exec vehicle_db psql -U vehicle -d vehicle_db -c "SELECT id, patente, marca, modelo, \"tipoVehiculo\", \"precioDiario\", estado, verificacion, activo FROM vehiculos WHERE patente = 'AD777EX';"

@@ -13,3 +13,4 @@ export const modificarVehiculo = (id, d) =>
 export const bajaVehiculo = (id) => request(`/${id}`, { method: "DELETE" });
 export const registrarVehiculoExterno = (d) =>
   request("/externos", { method: "POST", body: JSON.stringify(d) });
+export const obtenerMisVehiculosExternos = () => request("/externos");
