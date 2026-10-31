@@ -14,8 +14,11 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import grpc
 from grpc_tools import protoc
+from pika.exceptions import AMQPError
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+
+from eventos import broker, contratos
 
 PROTO_DIR = os.path.join(os.path.dirname(__file__), "proto")
 GENERATED_DIR = os.path.join(os.path.dirname(__file__), "generated")
@@ -60,6 +63,72 @@ def engine_desde_env():
     return create_engine(url, pool_pre_ping=True)
 
 
+def asegurar_esquema_mantenimiento(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE reservas
+                ADD COLUMN IF NOT EXISTS mantenimiento_resultado VARCHAR
+                    CHECK (
+                        mantenimiento_resultado IN (
+                            'REALIZADO', 'NO_REALIZADO'
+                        )
+                    )
+                """
+            )
+        )
+
+
+def _publicar_reserva_confirmada(reserva) -> None:
+    payload = {
+        "reservaId": reserva["id"],
+        "vehiculoId": reserva["vehiculo_id"],
+        "fechaInicio": reserva["fecha_inicio"].isoformat(),
+        "fechaFin": reserva["fecha_finalizacion"].isoformat(),
+    }
+    try:
+        broker.publicar(contratos.RESERVA_CONFIRMADA, payload)
+    except AMQPError as error:
+        print(
+            f"[eventos] no se pudo publicar reserva.confirmada para la "
+            f"reserva {reserva['id']} ({error!r})",
+            flush=True,
+        )
+
+
+def _registrar_resultado_mantenimiento(engine, payload: dict, _evento: dict) -> None:
+    with engine.begin() as conn:
+        reserva = conn.execute(
+            text(
+                """
+                UPDATE reservas
+                SET mantenimiento_resultado = :resultado,
+                    "actualizadoEn" = now()
+                WHERE id = :reserva_id AND vehiculo_id = :vehiculo_id
+                RETURNING id
+                """
+            ),
+            {
+                "resultado": payload["resultado"],
+                "reserva_id": payload["reservaId"],
+                "vehiculo_id": payload["vehiculoId"],
+            },
+        ).first()
+
+    if reserva is None:
+        raise ValueError(
+            "No existe la reserva "
+            f"{payload['reservaId']} para el vehículo {payload['vehiculoId']}"
+        )
+
+    print(
+        f"[eventos] mantenimiento de reserva {reserva.id}: "
+        f"{payload['resultado']}",
+        flush=True,
+    )
+
+
 def _parsear_fecha(valor: str, nombre: str, context) -> datetime:
     try:
         fecha = datetime.fromisoformat(valor.replace("Z", "+00:00"))
@@ -81,7 +150,9 @@ def _fila_a_pb(reserva) -> pb.Reserva:
     respuesta.fecha_inicio = reserva["fecha_inicio"].isoformat()
     respuesta.fecha_finalizacion = reserva["fecha_finalizacion"].isoformat()
     respuesta.importe_total = float(reserva["importe_total"])
-    respuesta.estado = pb.EstadoReserva.Value(reserva["estado"])
+    respuesta.estado = pb.EstadoReserva.Value(
+        f"ESTADO_RESERVA_{reserva['estado']}"
+    )
     respuesta.activo = reserva["activo"]
     return respuesta
 
@@ -141,13 +212,14 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 clientes_pb2.VerificarActivoRequest(id=request.cliente_id),
                 timeout=5,
             )
-            vehiculo = self.vehicle_client.ObtenerVehiculo(
+            vehiculo_response = self.vehicle_client.ObtenerVehiculo(
                 vehiculos_pb2.ObtenerVehiculoRequest(id=request.vehiculo_id),
                 timeout=5,
             )
         except grpc.RpcError as error:
             self._reenviar_error_grpc(error, context, "servicio de dominio")
 
+        vehiculo = vehiculo_response.vehiculo
         if not cliente.activo:
             context.abort(
                 grpc.StatusCode.NOT_FOUND,
@@ -157,6 +229,16 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
                 f"El vehículo con id {request.vehiculo_id} está inactivo",
+            )
+        if (
+            vehiculo.HasField("verificacion")
+            and vehiculo.verificacion
+            == vehiculos_pb2.RESULTADO_VERIFICACION_ROBADO
+        ):
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"El vehículo con id {request.vehiculo_id} está denunciado "
+                "como robado y no admite nuevas reservas",
             )
 
         dias = math.ceil((fin - inicio).total_seconds() / 86_400)
@@ -200,18 +282,21 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                     "El vehículo ya está reservado para esas fechas",
                 )
             raise
-        return _fila_a_pb(reserva)
+        _publicar_reserva_confirmada(reserva)
+        return pb.CrearReservaResponse(reserva=_fila_a_pb(reserva))
 
-    def ConsultarReservas(self, request, context):
-        print("[gRPC] ConsultarReservas invocado por el Gateway", flush=True)
+    def ListarReservas(self, request, context):
+        print("[gRPC] ListarReservas invocado por el Gateway", flush=True)
         condiciones = []
         parametros = {}
         if request.HasField("cliente_id"):
             condiciones.append("cliente_id = :cliente_id")
             parametros["cliente_id"] = request.cliente_id
         if request.HasField("estado"):
-            estado = pb.EstadoReserva.Name(request.estado)
-            if estado != "ESTADO_RESERVA_UNSPECIFIED":
+            estado = pb.EstadoReserva.Name(request.estado).removeprefix(
+                "ESTADO_RESERVA_"
+            )
+            if estado != "UNSPECIFIED":
                 condiciones.append("estado = :estado")
                 parametros["estado"] = estado
 
@@ -222,7 +307,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
         with self.engine.connect() as conn:
             reservas = conn.execute(text(consulta), parametros).mappings().all()
 
-        respuesta = pb.ConsultarReservasResponse()
+        respuesta = pb.ListarReservasResponse()
         for reserva in reservas:
             respuesta.reservas.append(_fila_a_pb(reserva))
         return respuesta
@@ -275,10 +360,12 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 ),
                 {"id": request.id},
             ).mappings().one()
-        return _fila_a_pb(reserva_actualizada)
+        return pb.CancelarReservaResponse(
+            reserva=_fila_a_pb(reserva_actualizada)
+        )
 
-    def ConsultarHistorial(self, request, context):
-        print("[gRPC] ConsultarHistorial invocado por el Gateway", flush=True)
+    def ListarHistorial(self, request, context):
+        print("[gRPC] ListarHistorial invocado por el Gateway", flush=True)
         condiciones = [
             "(estado = 'CANCELADA' OR "
             "(estado = 'CONFIRMADA' AND \"fechaFinalizacion\" <= now()))"
@@ -299,7 +386,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 parametros,
             ).mappings().all()
 
-        respuesta = pb.ConsultarHistorialResponse()
+        respuesta = pb.ListarHistorialResponse()
         for reserva in reservas:
             item = dict(reserva)
             if item["estado"] == "CONFIRMADA":
@@ -307,8 +394,8 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             respuesta.reservas.append(_fila_a_pb(item))
         return respuesta
 
-    def ConsultarVehiculosOcupados(self, request, context):
-        print("[gRPC] ConsultarVehiculosOcupados invocado", flush=True)
+    def ListarVehiculosOcupados(self, request, context):
+        print("[gRPC] ListarVehiculosOcupados invocado", flush=True)
         inicio = _parsear_fecha(request.fecha_inicio, "fecha_inicio", context)
         fin = _parsear_fecha(
             request.fecha_finalizacion, "fecha_finalizacion", context
@@ -333,14 +420,14 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                 ),
                 {"inicio": inicio, "fin": fin},
             ).all()
-        return pb.ConsultarVehiculosOcupadosResponse(
+        return pb.ListarVehiculosOcupadosResponse(
             vehiculo_ids=[fila[0] for fila in filas]
         )
 
-    def ConsultarEstadosVehiculos(self, request, context):
-        print("[gRPC] ConsultarEstadosVehiculos invocado", flush=True)
+    def ListarEstadosVehiculos(self, request, context):
+        print("[gRPC] ListarEstadosVehiculos invocado", flush=True)
         ids = list(request.vehiculo_ids)
-        respuesta = pb.ConsultarEstadosVehiculosResponse()
+        respuesta = pb.ListarEstadosVehiculosResponse()
         if not ids:
             return respuesta
 
@@ -385,6 +472,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
 
 def main():
     engine = engine_desde_env()
+    asegurar_esquema_mantenimiento(engine)
     customer_channel = grpc.insecure_channel(
         os.environ.get("CUSTOMER_SERVICE_URL", "localhost:50052")
     )
@@ -399,6 +487,14 @@ def main():
     server.add_insecure_port(f"[::]:{puerto}")
     print(f"Rental Service escuchando en puerto {puerto}", flush=True)
     server.start()
+    broker.escuchar(
+        contratos.COLA_RESERVAS_MANTENIMIENTO,
+        {
+            contratos.MANTENIMIENTO_RESULTADO: lambda payload, evento: (
+                _registrar_resultado_mantenimiento(engine, payload, evento)
+            )
+        },
+    )
     server.wait_for_termination()
 
 

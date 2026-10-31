@@ -27,6 +27,9 @@ import {
   ReservaGrpc,
   ReservaServiceGrpcClient,
 } from './grpc/reserva-grpc.interface';
+import { toProtoEnum } from '../common/grpc/proto-enum';
+import { fromReservaProto } from './grpc/reserva-grpc.mapper';
+import { fromVehiculoProto } from '../vehiculos/grpc/vehiculo-grpc.mapper';
 
 @Injectable()
 export class ReservasService implements OnModuleInit {
@@ -67,14 +70,16 @@ export class ReservasService implements OnModuleInit {
         ? { ...filtro, clienteId: user.id }
         : filtro;
     const response = await firstValueFrom(
-      this.reservasGrpc.consultarReservas({
+      this.reservasGrpc.listarReservas({
         ...(filtroAplicado.clienteId !== undefined && {
           clienteId: filtroAplicado.clienteId,
         }),
-        ...(filtroAplicado.estado && { estado: filtroAplicado.estado }),
+        ...(filtroAplicado.estado && {
+          estado: toProtoEnum('ESTADO_RESERVA', filtroAplicado.estado),
+        }),
       }),
     );
-    const reservas = response.reservas ?? [];
+    const reservas = (response.reservas ?? []).map(fromReservaProto);
     if (reservas.length === 0) return [];
 
     const [clientes, vehiculos] = await Promise.all([
@@ -85,7 +90,9 @@ export class ReservasService implements OnModuleInit {
       (clientes.clientes ?? []).map((cliente) => [cliente.id, cliente]),
     );
     const vehiculosPorId = new Map<number, VehiculoGrpc>(
-      (vehiculos.vehiculos ?? []).map((vehiculo) => [vehiculo.id, vehiculo]),
+      (vehiculos.vehiculos ?? [])
+        .map(fromVehiculoProto)
+        .map((vehiculo) => [vehiculo.id, vehiculo]),
     );
 
     return reservas
@@ -134,7 +141,7 @@ export class ReservasService implements OnModuleInit {
     try {
       // Rental Service valida cliente y vehículo por gRPC y garantiza en su
       // propia base, mediante una restricción EXCLUDE, que no haya solapamientos.
-      const reserva = await firstValueFrom(
+      const { reserva: reservaProto } = await firstValueFrom(
         this.reservasGrpc.crearReserva({
           vehiculoId: dto.vehiculo,
           clienteId,
@@ -142,6 +149,7 @@ export class ReservasService implements OnModuleInit {
           fechaFinalizacion: dto.fechaFinalizacion,
         }),
       );
+      const reserva = fromReservaProto(reservaProto);
       return {
         id: reserva.id,
         vehiculo: { id: reserva.vehiculoId },
@@ -159,9 +167,10 @@ export class ReservasService implements OnModuleInit {
 
   async cancel(id: number, clienteId: number): Promise<ReservaGrpc> {
     try {
-      return await firstValueFrom(
+      const { reserva } = await firstValueFrom(
         this.reservasGrpc.cancelarReserva({ id, clienteId }),
       );
+      return fromReservaProto(reserva);
     } catch (error) {
       this.mapGrpcError(error);
     }

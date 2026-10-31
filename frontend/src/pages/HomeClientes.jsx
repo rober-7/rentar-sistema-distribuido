@@ -23,7 +23,7 @@ export default function HomeCliente() {
       </div>
       <Container className="pb-5">
         <Row className="g-4">
-          <Col md={4}>
+          <Col md={6} lg={3}>
             <Card className="h-100 text-center p-3">
               <Card.Body>
                 <Card.Title>Buscar Vehículos</Card.Title>
@@ -34,7 +34,7 @@ export default function HomeCliente() {
               </Card.Body>
             </Card>
           </Col>
-          <Col md={4}>
+          <Col md={6} lg={3}>
             <Card className="h-100 text-center p-3">
               <Card.Body>
                 <Card.Title>Mis Reservas</Card.Title>
@@ -48,7 +48,7 @@ export default function HomeCliente() {
               </Card.Body>
             </Card>
           </Col>
-          <Col md={4}>
+          <Col md={6} lg={3}>
             <Card className="h-100 text-center p-3">
               <Card.Body>
                 <Card.Title>Historial</Card.Title>
@@ -60,6 +60,30 @@ export default function HomeCliente() {
                   onClick={() => navigate("/cliente/historial")}
                 >
                   Ver Historial
+                </Button>
+              </Card.Body>
+            </Card>
+          </Col>
+          <Col md={6} lg={3}>
+            <Card className="h-100 text-center p-3">
+              <Card.Body>
+                <Card.Title>Ofrecer mi Vehículo</Card.Title>
+                <Card.Text>
+                  Registrá tu vehículo externo para ofrecerlo en alquiler.
+                </Card.Text>
+                <Button
+                  variant="info"
+                  className="text-white"
+                  onClick={() => navigate("/cliente/publicar-vehiculo")}
+                >
+                  Publicar Vehículo
+                </Button>
+                <Button
+                  variant="outline-info"
+                  className="d-block mx-auto mt-2"
+                  onClick={() => navigate("/cliente/mis-vehiculos")}
+                >
+                  Mis Vehículos Ofrecidos
                 </Button>
               </Card.Body>
             </Card>

@@ -1,0 +1,234 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+"""
+Estado de un alquiler dentro del historial (solo incluye reservas pasadas o canceladas, nunca las vigentes/futuras).
+"""
+enum EstadoHistorialAlquiler {
+  """La reserva fue cancelada por el cliente."""
+  CANCELADA
+
+  """
+  La reserva estuvo CONFIRMADA y su período ya terminó (fechaFinalizacion <= ahora).
+  """
+  FINALIZADA
+}
+
+"""Estado de una reserva."""
+enum EstadoReserva {
+  """
+  Reserva cancelada por el cliente antes de que comenzara el alquiler; no bloquea el vehículo.
+  """
+  CANCELADA
+
+  """Reserva activa y vigente; bloquea el vehículo para ese período."""
+  CONFIRMADA
+}
+
+"""
+Filtros para buscar vehículos disponibles en un período. Un período es válido cuando fechaFin es estrictamente posterior a fechaInicio (fechas iguales se rechazan); si no se cumple, la query devuelve un error "La fecha de finalización debe ser posterior a la fecha de inicio". Si se envían precioMinimo y precioMaximo, precioMinimo no puede ser mayor a precioMaximo (mismo tipo de error).
+"""
+input FiltroDisponibilidadInput {
+  """
+  Fin del período a consultar. Mismo formato que fechaInicio. Obligatorio. Debe ser estrictamente posterior a fechaInicio (un período de duración cero se rechaza).
+  """
+  fechaFin: DateTime!
+
+  """
+  Inicio del período a consultar. Scalar DateTime: acepta un string ISO-8601 con offset de zona horaria explícito (ej. "2026-11-01T10:00:00-03:00") o en UTC ("...Z"). Obligatorio. Debe ser estrictamente anterior a fechaFin.
+  """
+  fechaInicio: DateTime!
+
+  """
+  Filtra por marca (coincidencia parcial, no sensible a mayúsculas/minúsculas). Si se omite, no filtra por marca.
+  """
+  marca: String
+
+  """
+  Filtra por modelo (coincidencia parcial, no sensible a mayúsculas/minúsculas). Si se omite, no filtra por modelo.
+  """
+  modelo: String
+
+  """
+  Precio diario máximo (inclusive). Debe ser un número positivo. Si se envía junto con precioMinimo, no puede ser menor que éste.
+  """
+  precioMaximo: Float
+
+  """
+  Precio diario mínimo (inclusive). Debe ser un número positivo. Si se envía junto con precioMaximo, no puede ser mayor que éste.
+  """
+  precioMinimo: Float
+
+  """Filtra por tipo de vehículo exacto. Si se omite, no filtra por tipo."""
+  tipoVehiculo: TipoVehiculo
+}
+
+"""
+Filtros para la query "reservas". Todos los campos son opcionales; omitir el input entero equivale a no filtrar. No hay validación de que desde sea anterior a hasta: se usan de forma independiente para buscar solapamiento de período (ver descripción de cada campo).
+"""
+input FiltroReservasInput {
+  """
+  Filtra por id de cliente. Si quien consulta tiene rol CLIENTE, este valor se ignora y se usa siempre su propio id (un cliente no puede ver reservas ajenas). Solo tiene efecto real para ADMIN.
+  """
+  clienteId: Int
+
+  """
+  Incluye reservas cuyo período termine en o después de esta fecha (fechaFinalizacion >= desde). Scalar DateTime, ISO-8601 con offset de zona horaria explícito; la respuesta siempre normaliza las fechas a UTC.
+  """
+  desde: DateTime
+
+  """Filtra por estado exacto de la reserva."""
+  estado: EstadoReserva
+
+  """
+  Incluye reservas cuyo período empiece en o antes de esta fecha (fechaInicio <= hasta). Mismo formato que desde.
+  """
+  hasta: DateTime
+
+  """Filtra por tipo de vehículo exacto."""
+  tipoVehiculo: TipoVehiculo
+
+  """Filtra por id de vehículo exacto."""
+  vehiculoId: Int
+}
+
+"""
+Un alquiler pasado del cliente autenticado. Solo incluye reservas canceladas o ya finalizadas; las vigentes/futuras no aparecen acá (ver la query "reservas" para esas).
+"""
+type HistorialAlquiler {
+  """
+  Cantidad de días del alquiler, por bloques de 24hs redondeados hacia arriba
+  """
+  cantidadDias: Int!
+
+  """Si el alquiler terminó con normalidad o fue cancelado"""
+  estado: EstadoHistorialAlquiler!
+
+  """Fin del período alquilado. Mismo formato que fechaInicio."""
+  fechaFinalizacion: DateTime!
+
+  """
+  Inicio del período alquilado. Scalar DateTime: siempre se devuelve normalizado a UTC (sufijo "Z").
+  """
+  fechaInicio: DateTime!
+
+  """Importe total cobrado por el alquiler"""
+  importeTotal: Float!
+
+  """Patente del vehículo alquilado"""
+  patente: String!
+
+  """Marca y modelo del vehículo alquilado"""
+  vehiculo: String!
+}
+
+type Query {
+  health: String!
+
+  """Historial del cliente autenticado."""
+  historialAlquileres: [HistorialAlquiler!]!
+
+  """El cliente ve solo sus reservas; el administrador puede ver todas."""
+  reservas(filtro: FiltroReservasInput): [ReservaConsulta!]!
+
+  """Vehículos disponibles en el período solicitado."""
+  vehiculosDisponibles(filtro: FiltroDisponibilidadInput!): [VehiculoDisponible!]!
+}
+
+"""Una reserva, tal como la devuelve la query "reservas"."""
+type ReservaConsulta {
+  """Nombre y apellido del cliente que reservó"""
+  cliente: String!
+
+  """Id del cliente que reservó"""
+  clienteId: Int!
+
+  """Estado actual de la reserva"""
+  estado: EstadoReserva!
+
+  """Fin del período reservado. Mismo formato que fechaInicio."""
+  fechaFinalizacion: DateTime!
+
+  """
+  Inicio del período reservado. Scalar DateTime: siempre se devuelve normalizado a UTC (sufijo "Z"), aunque se haya creado la reserva con otro offset de zona horaria.
+  """
+  fechaInicio: DateTime!
+
+  """Identificador único de la reserva"""
+  id: Int!
+
+  """
+  Importe total de la reserva, calculado al momento de crearla (precioDiario × días, por bloques de 24hs redondeados hacia arriba)
+  """
+  importeTotal: Float!
+
+  """Patente del vehículo reservado"""
+  patente: String!
+
+  """Precio diario del vehículo vigente al momento de reservar"""
+  precioDiario: Float!
+
+  """Marca y modelo del vehículo reservado"""
+  vehiculo: String!
+
+  """Id del vehículo reservado"""
+  vehiculoId: Int!
+}
+
+"""Categoría de carrocería de un vehículo."""
+enum TipoVehiculo {
+  """Coupé, 2 puertas"""
+  COUPE
+
+  """Hatchback, baúl integrado a la cabina"""
+  HATCHBACK
+
+  """Camioneta con caja de carga"""
+  PICKUP
+
+  """Sedán, 4 puertas, baúl separado"""
+  SEDAN
+
+  """Utilitario deportivo"""
+  SUV
+}
+
+"""
+Un vehículo que está libre durante todo el período consultado en vehiculosDisponibles (sin reservas CONFIRMADAS que se superpongan).
+"""
+type VehiculoDisponible {
+  """Año de fabricación"""
+  anio: Int!
+
+  """Color del vehículo, si está cargado"""
+  color: String
+
+  """Identificador único del vehículo"""
+  id: Int!
+
+  """
+  Importe para el período consultado, por bloques de 24 horas redondeados hacia arriba. Se recalcula al crear la reserva con el precio vigente.
+  """
+  importeTotal: Float!
+
+  """Marca del vehículo (ej. Toyota)"""
+  marca: String!
+
+  """Modelo del vehículo (ej. Corolla)"""
+  modelo: String!
+
+  """Patente del vehículo"""
+  patente: String!
+
+  """Precio de alquiler por día, en la moneda del sistema"""
+  precioDiario: Float!
+
+  """Categoría del vehículo"""
+  tipoVehiculo: TipoVehiculo!
+}

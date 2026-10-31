@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS reservas (
     "importeTotal" NUMERIC(10, 2) NOT NULL CHECK ("importeTotal" >= 0),
     estado VARCHAR NOT NULL DEFAULT 'CONFIRMADA'
         CHECK (estado IN ('CONFIRMADA', 'CANCELADA', 'FINALIZADA')),
+    mantenimiento_resultado VARCHAR
+        CHECK (mantenimiento_resultado IN ('REALIZADO', 'NO_REALIZADO')),
     activo BOOLEAN NOT NULL DEFAULT TRUE,
     "creadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "actualizadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),

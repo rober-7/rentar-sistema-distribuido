@@ -119,7 +119,7 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
                     f"No existe un cliente con id {request.id}",
                 )
 
-            return _fila_a_pb(c)
+            return pb.ObtenerClienteResponse(cliente=_fila_a_pb(c))
 
     def VerificarExistencia(self, request, context):
         print(f"[gRPC] VerificarExistencia({request.id}) invocado", flush=True)
@@ -186,7 +186,7 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
                     "rol": rol,
                 }
             ).mappings().first()
-            return _fila_a_pb(c)
+            return pb.CrearClienteResponse(cliente=_fila_a_pb(c))
 
     def ValidarLogin(self, request, context):
         print(f"[gRPC] ValidarLogin({request.email}) invocado", flush=True)
@@ -239,7 +239,8 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
             parametros["activo"] = request.activo
 
         if not sets:
-            return self.ObtenerCliente(request, context)
+            respuesta = self.ObtenerCliente(request, context)
+            return pb.ActualizarClienteResponse(cliente=respuesta.cliente)
 
         sql = f"""
             UPDATE usuarios
@@ -251,7 +252,7 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
             c = conn.execute(text(sql), parametros).mappings().first()
             if c is None:
                 context.abort(grpc.StatusCode.NOT_FOUND, f"No existe un cliente con id {request.id}")
-            return _fila_a_pb(c)
+            return pb.ActualizarClienteResponse(cliente=_fila_a_pb(c))
 
     def EliminarCliente(self, request, context):
         print(f"[gRPC] EliminarCliente({request.id}) invocado", flush=True)
@@ -266,7 +267,7 @@ class ClienteServiceServicer(pb_grpc.ClienteServiceServicer):
             
             if c is None:
                 context.abort(grpc.StatusCode.NOT_FOUND, f"No existe un cliente con id {request.id}")
-            return _fila_a_pb(c)    
+            return pb.EliminarClienteResponse(cliente=_fila_a_pb(c))
         
 
 def main():

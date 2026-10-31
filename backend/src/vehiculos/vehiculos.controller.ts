@@ -40,6 +40,25 @@ import {
   grpcErrorMessage,
   isGrpcServiceError,
 } from '../common/grpc/grpc-error';
+import { VerificacionVehiculo } from './enums/verificacion-vehiculo.enum';
+import { toProtoEnum } from '../common/grpc/proto-enum';
+import { fromVehiculoProto } from './grpc/vehiculo-grpc.mapper';
+
+/**
+ * Vehicle Service omite `verificacion` mientras la verificación policial
+ * está pendiente (llega después por RabbitMQ); la API lo expone explícito.
+ */
+function conVerificacion(vehiculo: VehiculoGrpc): VehiculoGrpc {
+  const resuelta =
+    vehiculo.verificacion === VerificacionVehiculo.VALIDADO ||
+    vehiculo.verificacion === VerificacionVehiculo.ROBADO;
+  return {
+    ...vehiculo,
+    verificacion: resuelta
+      ? vehiculo.verificacion
+      : VerificacionVehiculo.PENDIENTE,
+  };
+}
 
 @ApiTags('Vehiculos')
 @ApiBearerAuth()
@@ -97,9 +116,16 @@ export class VehiculosController implements OnModuleInit {
     @Body() createVehiculoDto: CreateVehiculoDto,
   ): Promise<VehiculoGrpc> {
     try {
-      return await firstValueFrom(
-        this.vehiculoGrpcService.crearVehiculo(createVehiculoDto),
+      const { vehiculo } = await firstValueFrom(
+        this.vehiculoGrpcService.crearVehiculo({
+          ...createVehiculoDto,
+          tipoVehiculo: toProtoEnum(
+            'TIPO_VEHICULO',
+            createVehiculoDto.tipoVehiculo,
+          ),
+        }),
       );
+      return conVerificacion(fromVehiculoProto(vehiculo));
     } catch (error) {
       if (
         isGrpcServiceError(error) &&
@@ -127,7 +153,7 @@ export class VehiculosController implements OnModuleInit {
       const { vehiculos } = await firstValueFrom(
         this.vehiculoGrpcService.listarVehiculos({}),
       );
-      return this.completarEstados(vehiculos);
+      return this.completarEstados(vehiculos.map(fromVehiculoProto));
     } catch (error) {
       this.lanzarErrorGrpc(error, 'ListarVehiculos');
     }
@@ -150,10 +176,10 @@ export class VehiculosController implements OnModuleInit {
   @ApiResponse({ status: 404, description: 'No existe un vehículo con ese id' })
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<VehiculoGrpc> {
     try {
-      const vehiculo = await firstValueFrom(
+      const { vehiculo } = await firstValueFrom(
         this.vehiculoGrpcService.obtenerVehiculo({ id }),
       );
-      return (await this.completarEstados([vehiculo]))[0];
+      return (await this.completarEstados([fromVehiculoProto(vehiculo)]))[0];
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
@@ -218,12 +244,16 @@ export class VehiculosController implements OnModuleInit {
     const request = {
       id,
       ...resto,
+      ...(resto.tipoVehiculo !== undefined && {
+        tipoVehiculo: toProtoEnum('TIPO_VEHICULO', resto.tipoVehiculo),
+      }),
       ...(color !== undefined ? { color: color ?? '' } : {}),
     };
     try {
-      return await firstValueFrom(
+      const { vehiculo } = await firstValueFrom(
         this.vehiculoGrpcService.actualizarVehiculo(request),
       );
+      return conVerificacion(fromVehiculoProto(vehiculo));
     } catch (error) {
       if (isGrpcServiceError(error) && error.code === GrpcStatus.NOT_FOUND) {
         throw new NotFoundException(`No existe un vehículo con id ${id}`);
@@ -250,7 +280,7 @@ export class VehiculosController implements OnModuleInit {
   ): Promise<VehiculoGrpc[]> {
     if (vehiculos.length === 0) return vehiculos;
     const { estados } = await firstValueFrom(
-      this.reservaGrpcService.consultarEstadosVehiculos({
+      this.reservaGrpcService.listarEstadosVehiculos({
         vehiculoIds: vehiculos.map((vehiculo) => vehiculo.id),
       }),
     );
@@ -258,7 +288,7 @@ export class VehiculosController implements OnModuleInit {
       (estados ?? []).map((item) => [item.vehiculoId, item.estado]),
     );
     return vehiculos.map((vehiculo) => ({
-      ...vehiculo,
+      ...conVerificacion(vehiculo),
       estado: estadoPorId.get(vehiculo.id) ?? 'DISPONIBLE',
     }));
   }

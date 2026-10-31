@@ -11,3 +11,6 @@ export const crearVehiculo = (d) =>
 export const modificarVehiculo = (id, d) =>
   request(`/${id}`, { method: "PATCH", body: JSON.stringify(d) });
 export const bajaVehiculo = (id) => request(`/${id}`, { method: "DELETE" });
+export const registrarVehiculoExterno = (d) =>
+  request("/externos", { method: "POST", body: JSON.stringify(d) });
+export const obtenerMisVehiculosExternos = () => request("/externos");

@@ -13,6 +13,19 @@ Gateway, ver test manual en la sesión), pero hoy ningún endpoint del Gateway
 lo invoca: tiene sentido recién cuando exista el Rental Service, que lo
 llamaría al crear/cancelar una reserva. Ver nota en el método sobre la tensión
 con el derive-on-read de estado.
+
+Hito 3: al crear un vehículo se publica vehiculos.verificacion.solicitada y
+el resultado (vehiculos.verificacion.resultado) llega de forma asíncrona por
+RabbitMQ. La verificación se guarda en la columna "verificacion", separada del
+estado operativo; un vehículo ROBADO deja de ofrecerse en disponibilidad y
+Rental Service rechaza reservarlo.
+
+Vehículos de propietarios externos: RegistrarVehiculoExterno guarda la
+solicitud PENDIENTE y publica vehiculos.externos.registrados. Registros
+Service valida patente y titularidad por separado; el correlador de este
+servicio junta los dos resultados y, si ambos son VALIDADO, publica
+vehiculos.externos.validacion.completada, cuyo consumidor incorpora el
+vehículo como DISPONIBLE. Un RECHAZADO deja la solicitud RECHAZADO.
 """
 
 import os
@@ -48,6 +61,7 @@ sys.path.insert(0, GENERATED_DIR)
 
 import vehiculos_pb2 as pb  # noqa: E402
 import vehiculos_pb2_grpc as pb_grpc  # noqa: E402
+from eventos import broker, contratos  # noqa: E402
 
 
 def engine_desde_env():
@@ -60,6 +74,26 @@ def engine_desde_env():
     return create_engine(url, pool_pre_ping=True)
 
 
+def asegurar_esquema_externos(engine) -> None:
+    # init.sql solo corre con un volumen nuevo. Re-ejecutarlo (es idempotente)
+    # crea vehiculos_externos si falta, y el ALTER agrega las columnas del
+    # correlador a una tabla ya existente, sin tener que borrar la base.
+    init_sql = os.path.join(os.path.dirname(__file__), "db", "init.sql")
+    with engine.begin() as conn:
+        with open(init_sql, encoding="utf-8") as sql:
+            conn.exec_driver_sql(sql.read())
+        for columna in ("validacionPatente", "validacionTitularidad"):
+            conn.execute(
+                text(
+                    f"""
+                    ALTER TABLE vehiculos_externos
+                    ADD COLUMN IF NOT EXISTS "{columna}" VARCHAR
+                        CHECK ("{columna}" IN ('VALIDADO', 'RECHAZADO'))
+                    """
+                )
+            )
+
+
 def _fila_a_pb(v) -> pb.Vehiculo:
     vehiculo_pb = pb.Vehiculo()
     vehiculo_pb.id = v["id"]
@@ -69,13 +103,346 @@ def _fila_a_pb(v) -> pb.Vehiculo:
     vehiculo_pb.anio = v["anio"]
     if v["color"] is not None:
         vehiculo_pb.color = v["color"]
-    vehiculo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(v["tipoVehiculo"])
+    vehiculo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(
+        f"TIPO_VEHICULO_{v['tipoVehiculo']}"
+    )
     vehiculo_pb.precio_diario = float(v["precioDiario"])
-    vehiculo_pb.estado = pb.EstadoVehiculo.Value(v["estado"])
+    vehiculo_pb.estado = pb.EstadoVehiculo.Value(
+        f"ESTADO_VEHICULO_{v['estado']}"
+    )
     vehiculo_pb.activo = v["activo"]
     vehiculo_pb.creado_en = v["creadoEn"].isoformat()
     vehiculo_pb.actualizado_en = v["actualizadoEn"].isoformat()
+    if v["verificacion"] is not None:
+        vehiculo_pb.verificacion = pb.ResultadoVerificacion.Value(
+            f"RESULTADO_VERIFICACION_{v['verificacion']}"
+        )
     return vehiculo_pb
+
+
+def _fila_externo_a_pb(v) -> pb.VehiculoExterno:
+    externo_pb = pb.VehiculoExterno()
+    externo_pb.id = v["id"]
+    externo_pb.cliente_id = v["clienteId"]
+    externo_pb.patente = v["patente"]
+    externo_pb.marca = v["marca"]
+    externo_pb.modelo = v["modelo"]
+    externo_pb.anio = v["anio"]
+    if v["color"] is not None:
+        externo_pb.color = v["color"]
+    externo_pb.tipo_vehiculo = pb.TipoVehiculo.Value(
+        f"TIPO_VEHICULO_{v['tipoVehiculo']}"
+    )
+    externo_pb.precio_diario = float(v["precioDiario"])
+    externo_pb.estado = pb.EstadoVehiculoExterno.Value(
+        f"ESTADO_VEHICULO_EXTERNO_{v['estado']}"
+    )
+    externo_pb.creado_en = v["creadoEn"].isoformat()
+    externo_pb.actualizado_en = v["actualizadoEn"].isoformat()
+    if v["validacionPatente"] is not None:
+        externo_pb.validacion_patente = v["validacionPatente"]
+    if v["validacionTitularidad"] is not None:
+        externo_pb.validacion_titularidad = v["validacionTitularidad"]
+    return externo_pb
+
+
+def _solicitar_verificacion(vehiculo_id: int, patente: str) -> None:
+    # El vehículo ya quedó guardado: si el broker no está disponible no se
+    # revierte el alta, la verificación queda pendiente y se vuelve a pedir
+    # al reiniciar el servicio (ver _reintentar_verificaciones_pendientes).
+    try:
+        broker.publicar(
+            contratos.VERIFICACION_SOLICITADA,
+            {"vehiculoId": vehiculo_id, "patente": patente},
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[eventos] no se pudo solicitar la verificación de {patente} "
+            f"({error!r}); queda pendiente",
+            flush=True,
+        )
+
+
+def _reintentar_verificaciones_pendientes(engine) -> None:
+    with engine.connect() as conn:
+        pendientes = conn.execute(
+            text("SELECT id, patente FROM vehiculos WHERE verificacion IS NULL")
+        ).mappings().all()
+    for v in pendientes:
+        _solicitar_verificacion(v["id"], v["patente"])
+
+
+def _registrar_resultado_verificacion(engine, payload: dict, _evento: dict) -> None:
+    # Idempotente: recibir dos veces el mismo resultado deja el mismo valor.
+    with engine.begin() as conn:
+        fila = conn.execute(
+            text(
+                """
+                UPDATE vehiculos
+                SET verificacion = :resultado, "actualizadoEn" = now()
+                WHERE id = :id AND patente = :patente
+                RETURNING id
+                """
+            ),
+            {
+                "id": payload["vehiculoId"],
+                "patente": payload["patente"],
+                "resultado": payload["resultado"],
+            },
+        ).first()
+    if fila is None:
+        print(
+            f"[eventos] resultado de verificación para vehículo "
+            f"{payload['vehiculoId']} ({payload['patente']}) sin vehículo "
+            f"correspondiente; se ignora",
+            flush=True,
+        )
+        return
+    print(
+        f"[eventos] vehículo {payload['vehiculoId']} ({payload['patente']}) "
+        f"verificado: {payload['resultado']}",
+        flush=True,
+    )
+
+
+def _publicar_externo_registrado(
+    vehiculo_externo_id: int, cliente_id: int, patente: str
+) -> None:
+    try:
+        broker.publicar(
+            contratos.EXTERNOS_REGISTRADOS,
+            {
+                "vehiculoExternoId": vehiculo_externo_id,
+                "clienteId": cliente_id,
+                "patente": patente,
+            },
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[eventos] no se pudo publicar el registro del vehículo externo "
+            f"{vehiculo_externo_id} ({patente}) ({error!r})",
+            flush=True,
+        )
+
+
+def _publicar_validacion_completada(vehiculo_externo_id: int) -> None:
+    # Las dos validaciones ya quedaron guardadas: si el broker falla se
+    # vuelve a publicar al reiniciar (ver _reintentar_externos_pendientes).
+    try:
+        broker.publicar(
+            contratos.EXTERNOS_VALIDACION_COMPLETADA,
+            {"vehiculoExternoId": vehiculo_externo_id},
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[eventos] no se pudo publicar la validación completada del "
+            f"vehículo externo {vehiculo_externo_id} ({error!r})",
+            flush=True,
+        )
+
+
+def _reintentar_externos_pendientes(engine) -> None:
+    """Retoma solicitudes PENDIENTE cuyo evento pudo haberse perdido.
+
+    - Con las dos validaciones VALIDADO: falta publicar completada.
+    - Con alguna validación sin resultado: se vuelve a publicar registrados.
+      Si los resultados ya estaban en camino llegan repetidos, y el
+      correlador los procesa sin efecto (es idempotente).
+    """
+    with engine.connect() as conn:
+        pendientes = conn.execute(
+            text(
+                """
+                SELECT id, "clienteId", patente,
+                       "validacionPatente", "validacionTitularidad"
+                FROM vehiculos_externos
+                WHERE estado = 'PENDIENTE'
+                """
+            )
+        ).mappings().all()
+    for v in pendientes:
+        if v["validacionPatente"] == v["validacionTitularidad"] == "VALIDADO":
+            _publicar_validacion_completada(v["id"])
+        else:
+            _publicar_externo_registrado(v["id"], v["clienteId"], v["patente"])
+
+
+# Columna de vehiculos_externos donde el correlador guarda cada resultado.
+_COLUMNA_VALIDACION = {
+    contratos.EXTERNOS_VALIDACION_PATENTE: "validacionPatente",
+    contratos.EXTERNOS_VALIDACION_TITULARIDAD: "validacionTitularidad",
+}
+
+
+def _correlacionar_validacion_externo(engine, payload: dict, evento: dict) -> None:
+    """Correlador: junta los resultados de las dos validaciones de una misma
+    solicitud, que llegan en cualquier orden, usando vehiculoExternoId.
+
+    - Un RECHAZADO deja la solicitud RECHAZADO y el vehículo no se incorpora.
+    - Con los dos VALIDADO publica vehiculos.externos.validacion.completada.
+    - Si falta un resultado, solo guarda el que llegó y espera al otro.
+    """
+    vehiculo_externo_id = payload["vehiculoExternoId"]
+    columna = _COLUMNA_VALIDACION[evento["tipo"]]
+    resultado = payload["resultado"]
+
+    # FOR UPDATE: si los dos resultados se procesaran a la vez, el segundo
+    # espera al primero y ve su resultado ya guardado.
+    with engine.begin() as conn:
+        externo = conn.execute(
+            text(
+                """
+                SELECT estado, "validacionPatente", "validacionTitularidad"
+                FROM vehiculos_externos
+                WHERE id = :id
+                FOR UPDATE
+                """
+            ),
+            {"id": vehiculo_externo_id},
+        ).mappings().first()
+
+        if externo is None:
+            print(
+                f"[eventos] {evento['tipo']} para vehículo externo "
+                f"{vehiculo_externo_id} inexistente; se ignora",
+                flush=True,
+            )
+            return
+        if externo["estado"] != "PENDIENTE":
+            # Ya se resolvió (resultado repetido o llegado después de un
+            # rechazo): si faltaba se guarda para dejar constancia, pero la
+            # decisión no cambia.
+            conn.execute(
+                text(
+                    f"""
+                    UPDATE vehiculos_externos
+                    SET "{columna}" = :resultado
+                    WHERE id = :id AND "{columna}" IS NULL
+                    """
+                ),
+                {"id": vehiculo_externo_id, "resultado": resultado},
+            )
+            print(
+                f"[eventos] vehículo externo {vehiculo_externo_id} ya está "
+                f"{externo['estado']}; {columna} = {resultado} no cambia la "
+                f"decisión",
+                flush=True,
+            )
+            return
+
+        validaciones = {
+            "validacionPatente": externo["validacionPatente"],
+            "validacionTitularidad": externo["validacionTitularidad"],
+            columna: resultado,
+        }
+        rechazado = "RECHAZADO" in validaciones.values()
+        completo = all(v == "VALIDADO" for v in validaciones.values())
+
+        conn.execute(
+            text(
+                f"""
+                UPDATE vehiculos_externos
+                SET "{columna}" = :resultado,
+                    estado = CASE WHEN :rechazado THEN 'RECHAZADO' ELSE estado END,
+                    "actualizadoEn" = now()
+                WHERE id = :id
+                """
+            ),
+            {"id": vehiculo_externo_id, "resultado": resultado, "rechazado": rechazado},
+        )
+
+    print(
+        f"[eventos] vehículo externo {vehiculo_externo_id}: {columna} = "
+        f"{resultado}"
+        + (" -> RECHAZADO" if rechazado else "")
+        + (" -> validaciones completas" if completo else ""),
+        flush=True,
+    )
+    # Se publica después del commit, como el resto de los eventos.
+    if completo:
+        _publicar_validacion_completada(vehiculo_externo_id)
+
+
+def _completar_validacion_externo(engine, payload: dict, _evento: dict) -> None:
+    vehiculo_externo_id = payload["vehiculoExternoId"]
+    with engine.begin() as conn:
+        externo = conn.execute(
+            text(
+                """
+                SELECT id, "clienteId", patente, marca, modelo, anio, color,
+                       "tipoVehiculo", "precioDiario", estado,
+                       "validacionPatente", "validacionTitularidad"
+                FROM vehiculos_externos
+                WHERE id = :id
+                FOR UPDATE
+                """
+            ),
+            {"id": vehiculo_externo_id},
+        ).mappings().first()
+
+        if externo is None:
+            print(
+                f"[eventos] validación completada para vehículo externo "
+                f"{vehiculo_externo_id} inexistente; se ignora",
+                flush=True,
+            )
+            return
+        # Solo se incorpora lo que el correlador aprobó: un completada
+        # publicado a mano o para una solicitud rechazada no tiene efecto.
+        if not (
+            externo["estado"] != "RECHAZADO"
+            and externo["validacionPatente"] == "VALIDADO"
+            and externo["validacionTitularidad"] == "VALIDADO"
+        ):
+            print(
+                f"[eventos] validación completada para vehículo externo "
+                f"{vehiculo_externo_id} sin las dos validaciones aprobadas "
+                f"(estado {externo['estado']}); se ignora",
+                flush=True,
+            )
+            return
+
+        conn.execute(
+            text(
+                """
+                UPDATE vehiculos_externos
+                SET estado = 'APROBADO', "actualizadoEn" = now()
+                WHERE id = :id
+                """
+            ),
+            {"id": vehiculo_externo_id},
+        )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO vehiculos
+                    (patente, marca, modelo, anio, color, "tipoVehiculo",
+                     "precioDiario", estado, verificacion, activo,
+                     "creadoEn", "actualizadoEn")
+                VALUES
+                    (:patente, :marca, :modelo, :anio, :color, :tipo_vehiculo,
+                     :precio_diario, 'DISPONIBLE', 'VALIDADO', true,
+                     now(), now())
+                ON CONFLICT (patente) DO NOTHING
+                """
+            ),
+            {
+                "patente": externo["patente"],
+                "marca": externo["marca"],
+                "modelo": externo["modelo"],
+                "anio": externo["anio"],
+                "color": externo["color"],
+                "tipo_vehiculo": externo["tipoVehiculo"],
+                "precio_diario": externo["precioDiario"],
+            },
+        )
+
+    print(
+        f"[eventos] vehículo externo {vehiculo_externo_id} "
+        f"({externo['patente']}) aprobado e incorporado como DISPONIBLE",
+        flush=True,
+    )
 
 
 class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
@@ -90,7 +457,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     """
                     SELECT id, patente, marca, modelo, anio, color,
                            "tipoVehiculo", "precioDiario", estado, activo,
-                           "creadoEn", "actualizadoEn"
+                           verificacion, "creadoEn", "actualizadoEn"
                     FROM vehiculos
                     """
                 )
@@ -111,7 +478,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     """
                     SELECT id, patente, marca, modelo, anio, color,
                            "tipoVehiculo", "precioDiario", estado, activo,
-                           "creadoEn", "actualizadoEn"
+                           verificacion, "creadoEn", "actualizadoEn"
                     FROM vehiculos
                     WHERE id = :id
                     """
@@ -125,21 +492,23 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     f"No existe un vehículo con id {request.id}",
                 )
 
-            return _fila_a_pb(v)
+            return pb.ObtenerVehiculoResponse(vehiculo=_fila_a_pb(v))
 
     def FiltrarVehiculos(self, request, context):
         print(
             "[gRPC] FiltrarVehiculos invocado por el Gateway",
             flush=True,
         )
-        condiciones = ["activo = true"]
+        # Un vehículo denunciado como robado queda inhabilitado: no se ofrece
+        # en la consulta de disponibilidad. Los pendientes sí se ofrecen.
+        condiciones = ["activo = true", "verificacion IS DISTINCT FROM 'ROBADO'"]
         parametros = {}
 
         if request.HasField("tipo_vehiculo"):
             condiciones.append('"tipoVehiculo" = :tipo_vehiculo')
             parametros["tipo_vehiculo"] = pb.TipoVehiculo.Name(
                 request.tipo_vehiculo
-            )
+            ).removeprefix("TIPO_VEHICULO_")
         if request.HasField("marca"):
             condiciones.append("marca ILIKE :marca")
             parametros["marca"] = f"%{request.marca}%"
@@ -156,7 +525,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         sql = f"""
             SELECT id, patente, marca, modelo, anio, color,
                    "tipoVehiculo", "precioDiario", estado, activo,
-                   "creadoEn", "actualizadoEn"
+                   verificacion, "creadoEn", "actualizadoEn"
             FROM vehiculos
             WHERE {' AND '.join(condiciones)}
         """
@@ -164,7 +533,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
         with self.engine.connect() as conn:
             vehiculos = conn.execute(text(sql), parametros).mappings().all()
 
-        respuesta = pb.ListarVehiculosResponse()
+        respuesta = pb.FiltrarVehiculosResponse()
         for v in vehiculos:
             respuesta.vehiculos.append(_fila_a_pb(v))
         return respuesta
@@ -175,7 +544,9 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             f"{pb.EstadoVehiculo.Name(request.estado)}) invocado",
             flush=True,
         )
-        nuevo_estado = pb.EstadoVehiculo.Name(request.estado)
+        nuevo_estado = pb.EstadoVehiculo.Name(request.estado).removeprefix(
+            "ESTADO_VEHICULO_"
+        )
         with self.engine.begin() as conn:
             v = conn.execute(
                 text(
@@ -185,7 +556,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     WHERE id = :id
                     RETURNING id, patente, marca, modelo, anio, color,
                               "tipoVehiculo", "precioDiario", estado, activo,
-                              "creadoEn", "actualizadoEn"
+                              verificacion, "creadoEn", "actualizadoEn"
                     """
                 ),
                 {"id": request.id, "estado": nuevo_estado},
@@ -196,7 +567,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                 grpc.StatusCode.NOT_FOUND,
                 f"No existe un vehículo con id {request.id}",
             )
-        return _fila_a_pb(v)
+        return pb.ActualizarEstadoResponse(vehiculo=_fila_a_pb(v))
 
     def CrearVehiculo(self, request, context):
         print(
@@ -225,7 +596,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                          :precio_diario, 'DISPONIBLE', true, now(), now())
                     RETURNING id, patente, marca, modelo, anio, color,
                               "tipoVehiculo", "precioDiario", estado, activo,
-                              "creadoEn", "actualizadoEn"
+                              verificacion, "creadoEn", "actualizadoEn"
                     """
                 ),
                 {
@@ -234,12 +605,17 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     "modelo": request.modelo,
                     "anio": request.anio,
                     "color": request.color if request.HasField("color") else None,
-                    "tipo_vehiculo": pb.TipoVehiculo.Name(request.tipo_vehiculo),
+                    "tipo_vehiculo": pb.TipoVehiculo.Name(
+                        request.tipo_vehiculo
+                    ).removeprefix("TIPO_VEHICULO_"),
                     "precio_diario": request.precio_diario,
                 },
             ).mappings().first()
 
-        return _fila_a_pb(v)
+        # Se publica después del commit: el Gateway recibe la respuesta sin
+        # esperar la verificación, que llega más tarde por RabbitMQ.
+        _solicitar_verificacion(v["id"], v["patente"])
+        return pb.CrearVehiculoResponse(vehiculo=_fila_a_pb(v))
 
     def ActualizarVehiculo(self, request, context):
         print(
@@ -269,7 +645,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             sets.append('"tipoVehiculo" = :tipo_vehiculo')
             parametros["tipo_vehiculo"] = pb.TipoVehiculo.Name(
                 request.tipo_vehiculo
-            )
+            ).removeprefix("TIPO_VEHICULO_")
         if request.HasField("precio_diario"):
             sets.append('"precioDiario" = :precio_diario')
             parametros["precio_diario"] = request.precio_diario
@@ -283,7 +659,7 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
             WHERE id = :id
             RETURNING id, patente, marca, modelo, anio, color,
                       "tipoVehiculo", "precioDiario", estado, activo,
-                      "creadoEn", "actualizadoEn"
+                      verificacion, "creadoEn", "actualizadoEn"
         """
 
         with self.engine.begin() as conn:
@@ -293,11 +669,107 @@ class VehiculoServiceServicer(pb_grpc.VehiculoServiceServicer):
                     grpc.StatusCode.NOT_FOUND,
                     f"No existe un vehículo con id {request.id}",
                 )
-        return _fila_a_pb(v)
+        return pb.ActualizarVehiculoResponse(vehiculo=_fila_a_pb(v))
+
+    def RegistrarVehiculoExterno(self, request, context):
+        print(
+            f"[gRPC] RegistrarVehiculoExterno({request.patente}, "
+            f"cliente={request.cliente_id}) invocado por el Gateway",
+            flush=True,
+        )
+        with self.engine.begin() as conn:
+            existente_vehiculo = conn.execute(
+                text("SELECT 1 FROM vehiculos WHERE patente = :patente"),
+                {"patente": request.patente},
+            ).first()
+            if existente_vehiculo is not None:
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Ya existe un vehículo con la patente {request.patente}",
+                )
+
+            existente_externo = conn.execute(
+                text(
+                    """
+                    SELECT 1 FROM vehiculos_externos
+                    WHERE patente = :patente AND estado IN ('PENDIENTE', 'APROBADO')
+                    """
+                ),
+                {"patente": request.patente},
+            ).first()
+            if existente_externo is not None:
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Ya existe una solicitud en trámite o aprobada para la patente {request.patente}",
+                )
+
+            ve = conn.execute(
+                text(
+                    """
+                    INSERT INTO vehiculos_externos
+                        ("clienteId", patente, marca, modelo, anio, color,
+                         "tipoVehiculo", "precioDiario", estado,
+                         "creadoEn", "actualizadoEn")
+                    VALUES
+                        (:cliente_id, :patente, :marca, :modelo, :anio, :color,
+                         :tipo_vehiculo, :precio_diario, 'PENDIENTE',
+                         now(), now())
+                    RETURNING id, "clienteId", patente, marca, modelo, anio, color,
+                              "tipoVehiculo", "precioDiario", estado,
+                              "validacionPatente", "validacionTitularidad",
+                              "creadoEn", "actualizadoEn"
+                    """
+                ),
+                {
+                    "cliente_id": request.cliente_id,
+                    "patente": request.patente,
+                    "marca": request.marca,
+                    "modelo": request.modelo,
+                    "anio": request.anio,
+                    "color": request.color if request.HasField("color") else None,
+                    "tipo_vehiculo": pb.TipoVehiculo.Name(
+                        request.tipo_vehiculo
+                    ).removeprefix("TIPO_VEHICULO_"),
+                    "precio_diario": request.precio_diario,
+                },
+            ).mappings().first()
+
+        _publicar_externo_registrado(ve["id"], ve["clienteId"], ve["patente"])
+        return pb.RegistrarVehiculoExternoResponse(
+            vehiculo=_fila_externo_a_pb(ve)
+        )
+
+    def ListarVehiculosExternos(self, request, context):
+        print(
+            f"[gRPC] ListarVehiculosExternos(cliente={request.cliente_id}) "
+            f"invocado por el Gateway",
+            flush=True,
+        )
+        with self.engine.connect() as conn:
+            externos = conn.execute(
+                text(
+                    """
+                    SELECT id, "clienteId", patente, marca, modelo, anio, color,
+                           "tipoVehiculo", "precioDiario", estado,
+                           "validacionPatente", "validacionTitularidad",
+                           "creadoEn", "actualizadoEn"
+                    FROM vehiculos_externos
+                    WHERE "clienteId" = :cliente_id
+                    ORDER BY "creadoEn" DESC, id DESC
+                    """
+                ),
+                {"cliente_id": request.cliente_id},
+            ).mappings().all()
+
+        respuesta = pb.ListarVehiculosExternosResponse()
+        for v in externos:
+            respuesta.vehiculos.append(_fila_externo_a_pb(v))
+        return respuesta
 
 
 def main():
     engine = engine_desde_env()
+    asegurar_esquema_externos(engine)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     pb_grpc.add_VehiculoServiceServicer_to_server(
         VehiculoServiceServicer(engine), server
@@ -306,6 +778,37 @@ def main():
     server.add_insecure_port(f"[::]:{puerto}")
     print(f"Vehicle Service escuchando en puerto {puerto}", flush=True)
     server.start()
+
+    broker.escuchar(
+        contratos.COLA_VEHICULOS_VERIFICACION,
+        {
+            contratos.VERIFICACION_RESULTADO: lambda payload, evento: (
+                _registrar_resultado_verificacion(engine, payload, evento)
+            )
+        },
+    )
+    # Correlador: los dos resultados de validación llegan a la misma cola.
+    broker.escuchar(
+        contratos.COLA_VEHICULOS_EXTERNOS_VALIDACIONES,
+        {
+            contratos.EXTERNOS_VALIDACION_PATENTE: lambda payload, evento: (
+                _correlacionar_validacion_externo(engine, payload, evento)
+            ),
+            contratos.EXTERNOS_VALIDACION_TITULARIDAD: lambda payload, evento: (
+                _correlacionar_validacion_externo(engine, payload, evento)
+            ),
+        },
+    )
+    broker.escuchar(
+        contratos.COLA_VEHICULOS_EXTERNOS_COMPLETADA,
+        {
+            contratos.EXTERNOS_VALIDACION_COMPLETADA: lambda payload, evento: (
+                _completar_validacion_externo(engine, payload, evento)
+            )
+        },
+    )
+    _reintentar_verificaciones_pendientes(engine)
+    _reintentar_externos_pendientes(engine)
     server.wait_for_termination()
 
 

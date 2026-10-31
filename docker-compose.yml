@@ -59,6 +59,66 @@ services:
       timeout: 5s
       retries: 10
 
+  registros_db:
+    image: postgres:16
+    container_name: rentar_registros_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: registros
+      POSTGRES_PASSWORD: registros
+      POSTGRES_DB: registros_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - registros_db_data:/var/lib/postgresql/data
+      - ./services/registros-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./services/registros-service/db/002-seed.sql:/docker-entrypoint-initdb.d/002-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registros -d registros_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mantenimiento_db:
+    image: postgres:16
+    container_name: rentar_mantenimiento_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mantenimiento
+      POSTGRES_PASSWORD: mantenimiento
+      POSTGRES_DB: mantenimiento_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - mantenimiento_db_data:/var/lib/postgresql/data
+      - ./services/mantenimiento-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mantenimiento -d mantenimiento_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rentar_rabbitmq
+    # RabbitMQ guarda los datos por nombre de nodo (rabbit@<hostname>); un
+    # hostname fijo evita perder colas y mensajes al recrear el contenedor.
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: rentar
+      RABBITMQ_DEFAULT_PASS: rentar
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
   adminer:
     image: adminer
     container_name: rentar_adminer
@@ -69,6 +129,8 @@ services:
       - customer_db
       - vehicle_db
       - rental_db
+      - registros_db
+      - mantenimiento_db
 
   vehicle_service:
     build:
@@ -83,11 +145,16 @@ services:
       DB_PASSWORD: vehicle
       DB_NAME: vehicle_db
       GRPC_PORT: 50051
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: vehicle-service
     volumes:
       - ./services/vehicle-service:/app
       - ./proto:/app/proto
+      - ./eventos:/app/eventos
     depends_on:
       vehicle_db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   customer_service:
@@ -125,16 +192,74 @@ services:
       GRPC_PORT: 50053
       CUSTOMER_SERVICE_URL: customer_service:50052
       VEHICLE_SERVICE_URL: vehicle_service:50051
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: rental-service
     volumes:
       - ./services/rental-service:/app
       - ./proto:/app/proto
+      - ./eventos:/app/eventos
     depends_on:
       rental_db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       customer_service:
         condition: service_started
       vehicle_service:
         condition: service_started
+
+  registros_service:
+    build:
+      context: ./services/registros-service
+      dockerfile: Dockerfile
+    container_name: rentar_registros_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: registros_db
+      DB_PORT: 5432
+      DB_USER: registros
+      DB_PASSWORD: registros
+      DB_NAME: registros_db
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: registros-service
+      DEMORA_VERIFICACION_SEGUNDOS: 3
+      CUSTOMER_SERVICE_URL: customer_service:50052
+    volumes:
+      - ./services/registros-service:/app
+      - ./proto:/app/proto
+      - ./eventos:/app/eventos
+    depends_on:
+      registros_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      customer_service:
+        condition: service_started
+
+  mantenimiento_service:
+    build:
+      context: ./services/mantenimiento-service
+      dockerfile: Dockerfile
+    container_name: rentar_mantenimiento_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: mantenimiento_db
+      DB_PORT: 5432
+      DB_USER: mantenimiento
+      DB_PASSWORD: mantenimiento
+      DB_NAME: mantenimiento_db
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: mantenimiento-service
+      DEMORA_MANTENIMIENTO_SEGUNDOS: 2
+      RESULTADO_MANTENIMIENTO: REALIZADO
+    volumes:
+      - ./services/mantenimiento-service:/app
+      - ./eventos:/app/eventos
+    depends_on:
+      mantenimiento_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   backend:
     build:
@@ -180,3 +305,6 @@ volumes:
   customer_db_data:
   vehicle_db_data:
   rental_db_data:
+  registros_db_data:
+  mantenimiento_db_data:
+  rabbitmq_data:

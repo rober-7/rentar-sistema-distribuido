@@ -13,6 +13,8 @@ import { VEHICULO_PACKAGE } from '../vehiculos/vehiculos.constants';
 import { VehiculoServiceGrpcClient } from '../vehiculos/grpc/vehiculo-grpc.interface';
 import { RENTAL_PACKAGE } from '../reservas/rental.constants';
 import { ReservaServiceGrpcClient } from '../reservas/grpc/reserva-grpc.interface';
+import { toProtoEnum } from '../common/grpc/proto-enum';
+import { fromVehiculoProto } from '../vehiculos/grpc/vehiculo-grpc.mapper';
 
 @Injectable()
 export class DisponibilidadService implements OnModuleInit {
@@ -55,7 +57,10 @@ export class DisponibilidadService implements OnModuleInit {
     const [{ vehiculos }, { vehiculoIds }] = await Promise.all([
       firstValueFrom(
         this.vehiculoGrpcService.filtrarVehiculos({
-          tipoVehiculo: filtro.tipoVehiculo,
+          tipoVehiculo:
+            filtro.tipoVehiculo === undefined
+              ? undefined
+              : toProtoEnum('TIPO_VEHICULO', filtro.tipoVehiculo),
           marca: filtro.marca,
           modelo: filtro.modelo,
           precioMinimo: filtro.precioMinimo,
@@ -63,7 +68,7 @@ export class DisponibilidadService implements OnModuleInit {
         }),
       ),
       firstValueFrom(
-        this.reservaGrpcService.consultarVehiculosOcupados({
+        this.reservaGrpcService.listarVehiculosOcupados({
           fechaInicio: filtro.fechaInicio.toISOString(),
           fechaFinalizacion: filtro.fechaFin.toISOString(),
         }),
@@ -72,6 +77,7 @@ export class DisponibilidadService implements OnModuleInit {
     const ocupados = new Set(vehiculoIds ?? []);
 
     return vehiculos
+      .map(fromVehiculoProto)
       .filter((vehiculo) => !ocupados.has(vehiculo.id))
       .map((vehiculo) => ({
         id: vehiculo.id,

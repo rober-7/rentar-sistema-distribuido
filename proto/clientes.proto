@@ -3,20 +3,60 @@ syntax = "proto3";
 package clientes;
 
 // Customer Service - gestiona el dominio de clientes (Hito 2).
+// ========================================================================
+// SERVICIO: ClienteService
+// Finalidad: Gestiona el dominio de clientes. Se encarga del ciclo de vida 
+// completo (ABM) de los usuarios, la validación de su estado y la 
+// verificación de credenciales para el inicio de sesión.
+// ========================================================================
+
 service ClienteService {
+   // Registra un nuevo cliente en el sistema.
+  // Requiere: Datos personales, de contacto y contraseña en texto plano.
+  // Devuelve: El objeto Cliente creado. Lanza ALREADY_EXISTS si el documento o email ya existen.
+  rpc CrearCliente (CrearClienteRequest) returns (CrearClienteResponse);
+
+  // Modifica parcialmente los datos de un cliente existente.
+  // Requiere: El ID del cliente y los campos específicos a modificar.
+  // Devuelve: El objeto Cliente con los datos actualizados.
+  // Nota: El documento es inmutable
+  rpc ActualizarCliente (ActualizarClienteRequest) returns (ActualizarClienteResponse);
+
+  // Ejecuta la baja lógica de un cliente (cambia su estado activo a false).
+  // Requiere: El ID del cliente a dar de baja.
+  // Devuelve: El objeto Cliente modificado (con activo = false).
+  rpc EliminarCliente (EliminarClienteRequest) returns (EliminarClienteResponse);
+
+  // Consulta los datos detallados de un cliente específico.
+  // Requiere: El ID del cliente a consultar.
+  // Devuelve: El objeto Cliente con toda su información. Lanza NOT_FOUND si no existe.
+  rpc ObtenerCliente(ObtenerClienteRequest) returns (ObtenerClienteResponse);
+
+  // Lista todos los clientes registrados en el sistema.
+  // Requiere: Petición vacía.
+  // Devuelve: Lista de clientes (filtra internamente solo aquellos con rol 'CLIENTE').
   rpc ListarClientes(ListarClientesRequest) returns (ListarClientesResponse);
-  rpc ObtenerCliente(ObtenerClienteRequest) returns (Cliente);
+  
+  // Verifica si un ID de cliente existe en la base de datos.
+  // Requiere: El ID del cliente.
+  // Devuelve: Un booleano indicando si el registro fue encontrado.
   rpc VerificarExistencia(VerificarExistenciaRequest) returns (VerificarExistenciaResponse);
+  
+  // Verifica si un cliente posee un estado operativo habilitado.
+  // Requiere: El ID del cliente.
+  // Devuelve: Un booleano 'activo' indicando su estado.
   rpc VerificarActivo(VerificarActivoRequest) returns (VerificarActivoResponse);
-  rpc CrearCliente (CrearClienteRequest) returns (Cliente);
-  rpc ActualizarCliente (ActualizarClienteRequest) returns (Cliente);
-  rpc EliminarCliente (EliminarClienteRequest) returns (Cliente);
-  // Usado por el Gateway para el login: el Customer Service es el único que
-  // conoce passwordHash, la comparación bcrypt se hace acá adentro y nunca
-  // viaja el hash por la red.
+  
+  // Valida las credenciales de acceso de un usuario.
+  // Requiere: Email y contraseña en texto plano.
+  // Devuelve: Estado de la validación ('valido') y datos básicos del usuario.
+  // Nota: Usado por el Gateway para el login. El Customer Service 
+  // es el único que conoce passwordHash; la comparación bcrypt se hace acá adentro 
+  // y nunca viaja el hash por la red.
   rpc ValidarLogin (ValidarLoginRequest) returns (ValidarLoginResponse);
 }
 
+// Representa la entidad principal de un Cliente/Usuario en el sistema.
 message Cliente {
   int32 id = 1;
   string documento = 2;
@@ -24,54 +64,34 @@ message Cliente {
   string apellido = 4;
   string email = 5;
   optional string telefono = 6;
-  string fecha_nacimiento = 7;
+  string fecha_nacimiento = 7;  // Formato esperado: YYYY-MM-DD, ej: "1999-01-01".
   bool activo = 8;
 }
 
-message ListarClientesRequest {}
-
-message ListarClientesResponse {
-  repeated Cliente clientes = 1;
-}
-
-message ObtenerClienteRequest {
-  int32 id = 1;
-}
-
-message VerificarExistenciaRequest {
-  int32 id = 1;
-}
-
-message VerificarExistenciaResponse {
-  bool existe = 1;
-}
-
-message VerificarActivoRequest {
-  int32 id = 1;
-}
-
-message VerificarActivoResponse {
-  bool activo = 1;
-}
-
+// Estructura de datos requerida para dar de alta un cliente.
 message CrearClienteRequest {
   string documento = 1;
   string nombre = 2;
   string apellido = 3;
   string email = 4;
   string telefono = 5;
-  string fecha_nacimiento = 6;
+  string fecha_nacimiento = 6; 
   string password = 7;
-  // Si no se manda, el servicio lo crea como CLIENTE (comportamiento
-  // original). El DTO REST público (POST /clientes) nunca expone este
-  // campo; solo lo usa el bootstrap interno del Gateway para crear el
-  // usuario ADMIN inicial.
+  // Rol del usuario. Si no se envía, el servicio lo crea como CLIENTE.
+  // El DTO REST público nunca expone este campo; solo lo usa el bootstrap 
+  // interno del Gateway para crear el usuario ADMIN inicial.
   optional string rol = 8;
 }
 
+// Respuesta exclusiva del alta de cliente.
+message CrearClienteResponse {
+  Cliente cliente = 1;
+}
+
+// Estructura para actualizar información. Los campos 'optional' omitidos 
+// no sobreescriben los valores actuales en la base de datos.
 message ActualizarClienteRequest {
   int32 id = 1;
-  // optional permite que si no mandan el campo, no se sobreescriba
   optional string nombre = 2;
   optional string apellido = 3;
   optional string telefono = 4;
@@ -79,15 +99,63 @@ message ActualizarClienteRequest {
   optional bool activo = 6;
 }
 
+// Respuesta exclusiva de la modificacion de cliente.
+message ActualizarClienteResponse {
+  Cliente cliente = 1;
+}
+
+// Solicitud para dar de baja lógica de un cliente.
 message EliminarClienteRequest {
   int32 id = 1;
 }
 
+// Respuesta exclusiva de la baja logica de cliente.
+message EliminarClienteResponse {
+  Cliente cliente = 1;
+}
+
+// Solicitud para buscar un cliente puntual mediante su identificador.
+message ObtenerClienteRequest {
+  int32 id = 1;
+}
+
+// Respuesta exclusiva de la consulta individual de cliente.
+message ObtenerClienteResponse {
+  Cliente cliente = 1;
+}
+
+// Solicitud sin parámetros para listar clientes.
+message ListarClientesRequest {}
+// Respuesta que contiene la colección de clientes solicitados.
+message ListarClientesResponse {
+  repeated Cliente clientes = 1;
+}
+
+// Solicitud para comprobar la existencia de un registro (mediante su ID).
+message VerificarExistenciaRequest {
+  int32 id = 1;
+}
+// Respuesta a la comprobación de existencia.
+message VerificarExistenciaResponse {
+  bool existe = 1;
+}
+
+// Solicitud para comprobar si un usuario no está dado de baja.
+message VerificarActivoRequest {
+  int32 id = 1;
+}
+// Respuesta booleana indicando si el cliente está activo.
+message VerificarActivoResponse {
+  bool activo = 1;
+}
+
+// Solicitud para iniciar sesión en el sistema.
 message ValidarLoginRequest {
   string email = 1;
   string password = 2;
 }
-
+// Respuesta con el resultado de autenticación. Incluye los datos 
+// de la sesión solo si las credenciales son correctas.
 message ValidarLoginResponse {
   bool valido = 1;
   optional int32 id = 2;
