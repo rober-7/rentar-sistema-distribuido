@@ -1,7 +1,9 @@
-import { Args, Query, Resolver } from '@nestjs/graphql';
+import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { ReservasService } from './reservas.service';
 import { FiltroReservasInput } from './dto/filtro-reservas.input';
 import { ReservaConsulta } from './dto/reserva-consulta.type';
+import { RegistrarDevolucionInput } from './dto/registrar-devolucion.input';
+import { DevolucionResponse } from './dto/devolucion-response.type';
 import { Authenticated } from '../auth/auth.guards';
 import { Roles } from '../auth/roles.decorator';
 import { RolUsuario } from '../clientes/enums/rol-usuario.enum';
@@ -22,5 +24,15 @@ export class ReservasResolver {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.reservasService.findAll(filtro ?? {}, user);
+  }
+
+  @Mutation(() => DevolucionResponse, {
+    name: 'registrarDevolucion',
+    description:
+      'Registra la devolución de un vehículo indicando reserva, kilometraje final y estado general.',
+  })
+  
+  registrarDevolucion(@Args('input') input: RegistrarDevolucionInput) {
+    return this.reservasService.registrarDevolucion(input);
   }
 }

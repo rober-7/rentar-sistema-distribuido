@@ -7,6 +7,27 @@ A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date
 """
 scalar DateTime
 
+"""Resultado de registrar la devolución de un vehículo."""
+type DevolucionResponse {
+  """Nuevo estado resultante de la reserva."""
+  estado: String!
+
+  """Estado físico general reportado del vehículo."""
+  estadoGeneral: String!
+
+  """Fecha y hora en que se registró la devolución."""
+  fechaDevolucion: DateTime!
+
+  """Kilometraje registrado al finalizar el alquiler."""
+  kilometrajeFinal: Int!
+
+  """Mensaje de confirmación de la operación."""
+  mensaje: String!
+
+  """Identificador de la reserva devuelta."""
+  reservaId: Int!
+}
+
 """
 Estado de un alquiler dentro del historial (solo incluye reservas pasadas o canceladas, nunca las vigentes/futuras).
 """
@@ -128,6 +149,13 @@ type HistorialAlquiler {
   vehiculo: String!
 }
 
+type Mutation {
+  """
+  Registra la devolución de un vehículo indicando reserva, kilometraje final y estado general.
+  """
+  registrarDevolucion(input: RegistrarDevolucionInput!): DevolucionResponse!
+}
+
 type Query {
   health: String!
 
@@ -139,6 +167,20 @@ type Query {
 
   """Vehículos disponibles en el período solicitado."""
   vehiculosDisponibles(filtro: FiltroDisponibilidadInput!): [VehiculoDisponible!]!
+}
+
+"""Datos necesarios para registrar la devolución de un vehículo."""
+input RegistrarDevolucionInput {
+  """
+  Estado general del vehículo al devolverse (EXCELENTE, BUENO, DANIO_LEVE, DANIO_GRAVE).
+  """
+  estadoGeneral: String!
+
+  """Kilometraje actual del vehículo al momento de la entrega."""
+  kilometrajeFinal: Int!
+
+  """Identificador de la reserva o alquiler que se devuelve."""
+  reservaId: Int!
 }
 
 """Una reserva, tal como la devuelve la query "reservas"."""
