@@ -8,8 +8,8 @@ import {
   OnModuleInit,
   Inject,
 } from '@nestjs/common';
- import { status as GrpcStatus } from '@grpc/grpc-js';
- import { ClientGrpc } from '@nestjs/microservices';
+import { status as GrpcStatus } from '@grpc/grpc-js';
+import { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { CreateReservaDto } from './dto/create-reserva.dto';
 import { FiltroReservasInput } from './dto/filtro-reservas.input';
@@ -181,16 +181,25 @@ export class ReservasService implements OnModuleInit {
   async registrarDevolucion(
     input: RegistrarDevolucionInput,
   ): Promise<DevolucionResponse> {
-    // TODO: En el próximo paso invocaremos por gRPC a Rental Service:
-    // const resultado = await firstValueFrom(this.reservasGrpc.registrarDevolucion(input));
-    return {
-      reservaId: input.reservaId,
-      kilometrajeFinal: input.kilometrajeFinal,
-      estadoGeneral: input.estadoGeneral,
-      mensaje: `Devolución registrada correctamente para la reserva #${input.reservaId}`,
-      fechaDevolucion: new Date(),
-      estado: 'FINALIZADA',
-    };
+    try {
+      const resultado = await firstValueFrom(
+        this.reservasGrpc.registrarDevolucion({
+          reservaId: input.reservaId,
+          kilometrajeFinal: input.kilometrajeFinal,
+          estadoGeneral: input.estadoGeneral,
+        }),
+      );
+      return {
+        reservaId: resultado.reservaId,
+        kilometrajeFinal: resultado.kilometrajeFinal,
+        estadoGeneral: resultado.estadoGeneral,
+        mensaje: resultado.mensaje,
+        fechaDevolucion: new Date(resultado.fechaDevolucion),
+        estado: resultado.estado,
+      };
+    } catch (error) {
+      this.mapGrpcError(error);
+    }
   }
 
   private toReservaConsulta(

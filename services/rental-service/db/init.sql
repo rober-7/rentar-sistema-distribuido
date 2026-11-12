@@ -8,9 +8,13 @@ CREATE TABLE IF NOT EXISTS reservas (
     "fechaFinalizacion" TIMESTAMPTZ NOT NULL,
     "importeTotal" NUMERIC(10, 2) NOT NULL CHECK ("importeTotal" >= 0),
     estado VARCHAR NOT NULL DEFAULT 'CONFIRMADA'
-        CHECK (estado IN ('CONFIRMADA', 'CANCELADA', 'FINALIZADA')),
+        CHECK (estado IN ('CONFIRMADA', 'CANCELADA', 'FINALIZADA', 'FINALIZADO')),
     mantenimiento_resultado VARCHAR
         CHECK (mantenimiento_resultado IN ('REALIZADO', 'NO_REALIZADO')),
+    kilometraje_final INTEGER CHECK (kilometraje_final >= 0),
+    estado_general VARCHAR
+        CHECK (estado_general IN ('EXCELENTE', 'BUENO', 'DANIO_LEVE', 'DANIO_GRAVE')),
+    fecha_devolucion TIMESTAMPTZ,
     activo BOOLEAN NOT NULL DEFAULT TRUE,
     "creadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "actualizadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),

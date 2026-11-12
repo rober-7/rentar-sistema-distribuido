@@ -40,6 +40,11 @@ service ReservaService {
   // Requiere: Una lista de IDs de vehículos.
   // Devuelve: El estado actual (DISPONIBLE, RESERVADO, EN_ALQUILER) cruzando la hora actual con las reservas.
   rpc ListarEstadosVehiculos(ListarEstadosVehiculosRequest) returns (ListarEstadosVehiculosResponse);
+
+  // Registra la devolución de un vehículo al finalizar un alquiler.
+  // Requiere: ID de la reserva, kilometraje final y estado general del vehículo.
+  // Devuelve: Los datos confirmados de la devolución tras actualizar la reserva y liberar el vehículo.
+  rpc RegistrarDevolucion(RegistrarDevolucionRequest) returns (RegistrarDevolucionResponse);
 }
 
 // Estados posibles en el ciclo de vida de una reserva.
@@ -127,4 +132,22 @@ message ListarEstadosVehiculosResponse {
 message EstadoVehiculoReserva {
   int32 vehiculo_id = 1;
   string estado = 2;
+}
+
+// Solicitud para registrar la devolución de un vehículo alquilado.
+message RegistrarDevolucionRequest {
+  int32 reserva_id = 1;
+  int32 kilometraje_final = 2;
+  string estado_general = 3;
+}
+
+// Respuesta confirmada tras registrar la devolución y restituir el vehículo.
+message RegistrarDevolucionResponse {
+  int32 reserva_id = 1;
+  int32 vehiculo_id = 2;
+  int32 kilometraje_final = 3;
+  string estado_general = 4;
+  string estado = 5;
+  string fecha_devolucion = 6;
+  string mensaje = 7;
 }

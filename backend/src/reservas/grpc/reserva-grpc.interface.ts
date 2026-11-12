@@ -15,6 +15,22 @@ export interface ReservaGrpcResponse {
   reserva: ReservaGrpc;
 }
 
+export interface RegistrarDevolucionGrpcRequest {
+  reservaId: number;
+  kilometrajeFinal: number;
+  estadoGeneral: string;
+}
+
+export interface RegistrarDevolucionGrpcResponse {
+  reservaId: number;
+  vehiculoId: number;
+  kilometrajeFinal: number;
+  estadoGeneral: string;
+  estado: string;
+  fechaDevolucion: string;
+  mensaje: string;
+}
+
 export interface ReservaServiceGrpcClient {
   crearReserva(data: {
     vehiculoId: number;
@@ -40,4 +56,7 @@ export interface ReservaServiceGrpcClient {
   listarEstadosVehiculos(data: { vehiculoIds: number[] }): Observable<{
     estados: Array<{ vehiculoId: number; estado: string }>;
   }>;
+  registrarDevolucion(
+    data: RegistrarDevolucionGrpcRequest,
+  ): Observable<RegistrarDevolucionGrpcResponse>;
 }

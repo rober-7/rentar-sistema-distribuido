@@ -80,6 +80,37 @@ def asegurar_esquema_mantenimiento(engine) -> None:
         )
 
 
+def asegurar_esquema_devolucion(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                ALTER TABLE reservas
+                ADD COLUMN IF NOT EXISTS kilometraje_final INTEGER
+                    CHECK (kilometraje_final >= 0),
+                ADD COLUMN IF NOT EXISTS estado_general VARCHAR
+                    CHECK (
+                        estado_general IN (
+                            'EXCELENTE', 'BUENO', 'DANIO_LEVE', 'DANIO_GRAVE'
+                        )
+                    ),
+                ADD COLUMN IF NOT EXISTS fecha_devolucion TIMESTAMPTZ;
+
+                ALTER TABLE reservas
+                DROP CONSTRAINT IF EXISTS reservas_estado_check;
+
+                ALTER TABLE reservas
+                ADD CONSTRAINT reservas_estado_check
+                    CHECK (
+                        estado IN (
+                            'CONFIRMADA', 'CANCELADA', 'FINALIZADA', 'FINALIZADO'
+                        )
+                    );
+                """
+            )
+        )
+
+
 def _publicar_reserva_confirmada(reserva) -> None:
     payload = {
         "reservaId": reserva["id"],
@@ -150,8 +181,11 @@ def _fila_a_pb(reserva) -> pb.Reserva:
     respuesta.fecha_inicio = reserva["fecha_inicio"].isoformat()
     respuesta.fecha_finalizacion = reserva["fecha_finalizacion"].isoformat()
     respuesta.importe_total = float(reserva["importe_total"])
+    estado_db = (
+        "FINALIZADA" if reserva["estado"] == "FINALIZADO" else reserva["estado"]
+    )
     respuesta.estado = pb.EstadoReserva.Value(
-        f"ESTADO_RESERVA_{reserva['estado']}"
+        f"ESTADO_RESERVA_{estado_db}"
     )
     respuesta.activo = reserva["activo"]
     return respuesta
@@ -296,7 +330,9 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             estado = pb.EstadoReserva.Name(request.estado).removeprefix(
                 "ESTADO_RESERVA_"
             )
-            if estado != "UNSPECIFIED":
+            if estado == "FINALIZADA":
+                condiciones.append("estado IN ('FINALIZADA', 'FINALIZADO')")
+            elif estado != "UNSPECIFIED":
                 condiciones.append("estado = :estado")
                 parametros["estado"] = estado
 
@@ -367,7 +403,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
     def ListarHistorial(self, request, context):
         print("[gRPC] ListarHistorial invocado por el Gateway", flush=True)
         condiciones = [
-            "(estado = 'CANCELADA' OR "
+            "(estado IN ('CANCELADA', 'FINALIZADA', 'FINALIZADO') OR "
             "(estado = 'CONFIRMADA' AND \"fechaFinalizacion\" <= now()))"
         ]
         parametros = {}
@@ -389,7 +425,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
         respuesta = pb.ListarHistorialResponse()
         for reserva in reservas:
             item = dict(reserva)
-            if item["estado"] == "CONFIRMADA":
+            if item["estado"] in ("CONFIRMADA", "FINALIZADO"):
                 item["estado"] = "FINALIZADA"
             respuesta.reservas.append(_fila_a_pb(item))
         return respuesta
@@ -469,10 +505,94 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             )
         return respuesta
 
+    def RegistrarDevolucion(self, request, context):
+        print(
+            f"[gRPC] RegistrarDevolucion(reserva={request.reserva_id}, "
+            f"km={request.kilometraje_final}, estado={request.estado_general}) invocado",
+            flush=True,
+        )
+        estados_validos = ("EXCELENTE", "BUENO", "DANIO_LEVE", "DANIO_GRAVE")
+        if request.reserva_id <= 0 or request.kilometraje_final < 0:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "El ID de la reserva debe ser positivo y el kilometraje no puede ser negativo",
+            )
+        if request.estado_general not in estados_validos:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"Estado general inválido. Valores permitidos: {', '.join(estados_validos)}",
+            )
+
+        with self.engine.begin() as conn:
+            reserva = conn.execute(
+                text(_SELECT_RESERVA + " WHERE id = :id FOR UPDATE"),
+                {"id": request.reserva_id},
+            ).mappings().first()
+
+            if reserva is None:
+                context.abort(
+                    grpc.StatusCode.NOT_FOUND,
+                    f"No existe una reserva con id {request.reserva_id}",
+                )
+
+            if reserva["estado"] in ("FINALIZADO", "FINALIZADA", "CANCELADA"):
+                context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    f"La reserva {request.reserva_id} ya se encuentra en estado "
+                    f"{reserva['estado']} y no admite devolución",
+                )
+
+            actualizada = conn.execute(
+                text(
+                    """
+                    UPDATE reservas
+                    SET estado = 'FINALIZADO',
+                        kilometraje_final = :kilometraje_final,
+                        estado_general = :estado_general,
+                        fecha_devolucion = now(),
+                        "actualizadoEn" = now()
+                    WHERE id = :id
+                    RETURNING id, vehiculo_id, kilometraje_final,
+                              estado_general, estado, fecha_devolucion
+                    """
+                ),
+                {
+                    "id": request.reserva_id,
+                    "kilometraje_final": request.kilometraje_final,
+                    "estado_general": request.estado_general,
+                },
+            ).mappings().one()
+
+        try:
+            self.vehicle_client.ActualizarEstado(
+                vehiculos_pb2.ActualizarEstadoRequest(
+                    id=actualizada["vehiculo_id"],
+                    estado=vehiculos_pb2.ESTADO_VEHICULO_DISPONIBLE,
+                ),
+                timeout=5,
+            )
+        except grpc.RpcError as error:
+            self._reenviar_error_grpc(error, context, "Vehicle Service")
+
+        return pb.RegistrarDevolucionResponse(
+            reserva_id=actualizada["id"],
+            vehiculo_id=actualizada["vehiculo_id"],
+            kilometraje_final=actualizada["kilometraje_final"],
+            estado_general=actualizada["estado_general"],
+            estado=actualizada["estado"],
+            fecha_devolucion=actualizada["fecha_devolucion"].isoformat(),
+            mensaje=(
+                f"Devolución registrada correctamente para la reserva "
+                f"#{actualizada['id']}. Vehículo #{actualizada['vehiculo_id']} "
+                "restituido a DISPONIBLE."
+            ),
+        )
+
 
 def main():
     engine = engine_desde_env()
     asegurar_esquema_mantenimiento(engine)
+    asegurar_esquema_devolucion(engine)
     customer_channel = grpc.insecure_channel(
         os.environ.get("CUSTOMER_SERVICE_URL", "localhost:50052")
     )
