@@ -98,6 +98,25 @@ services:
       timeout: 5s
       retries: 10
 
+  facturacion_db:
+    image: postgres:16
+    container_name: rentar_facturacion_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: facturacion
+      POSTGRES_PASSWORD: facturacion
+      POSTGRES_DB: facturacion_db
+    ports:
+      - "5437:5432"
+    volumes:
+      - facturacion_db_data:/var/lib/postgresql/data
+      - ./services/facturacion-service/db/init.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U facturacion -d facturacion_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: rentar_rabbitmq
@@ -131,6 +150,7 @@ services:
       - rental_db
       - registros_db
       - mantenimiento_db
+      - facturacion_db
 
   vehicle_service:
     build:
@@ -261,6 +281,31 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  facturacion_service:
+    build:
+      context: ./services/facturacion-service
+      dockerfile: Dockerfile
+    container_name: rentar_facturacion_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: facturacion_db
+      DB_PORT: 5432
+      DB_USER: facturacion
+      DB_PASSWORD: facturacion
+      DB_NAME: facturacion_db
+      RABBITMQ_URL: amqp://rentar:rentar@rabbitmq:5672/%2F
+      SERVICIO: facturacion-service
+      TOPE_KM_INCLUIDOS: 1000
+      COSTO_POR_KM_EXCEDIDO: 50.00
+    volumes:
+      - ./services/facturacion-service:/app
+      - ./eventos:/app/eventos
+    depends_on:
+      facturacion_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -307,4 +352,5 @@ volumes:
   rental_db_data:
   registros_db_data:
   mantenimiento_db_data:
+  facturacion_db_data:
   rabbitmq_data:

@@ -50,6 +50,14 @@ enum EstadoReserva {
 
   """Reserva activa y vigente; bloquea el vehículo para ese período."""
   CONFIRMADA
+
+  """Reserva finalizada tras la devolución del vehículo."""
+  FINALIZADA
+
+  """
+  Alquiler finalizado tras registrar la devolución del vehículo; libera el vehículo.
+  """
+  FINALIZADO
 }
 
 """

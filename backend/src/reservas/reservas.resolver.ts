@@ -31,7 +31,8 @@ export class ReservasResolver {
     description:
       'Registra la devolución de un vehículo indicando reserva, kilometraje final y estado general.',
   })
-  
+  @Authenticated()
+  @Roles(RolUsuario.ADMIN, RolUsuario.CLIENTE)
   registrarDevolucion(@Args('input') input: RegistrarDevolucionInput) {
     return this.reservasService.registrarDevolucion(input);
   }

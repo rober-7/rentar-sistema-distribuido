@@ -47,6 +47,8 @@ La carpeta se monta en cada servicio Python en `/app/eventos`, igual que
    vehiculos.externos.validacion.completada ──► vehiculos.externos-completada    (vehicle-service)
    reserva.confirmada                ──► mantenimiento.reservas-confirmadas (mantenimiento-service)
    mantenimiento.resultado           ──► reservas.mantenimiento-resultado   (rental-service)
+   alquileres.devolucion.registrada  ──► facturacion.devoluciones-registradas (facturacion-service)
+   facturacion.comprobante.emitido   ──► reservas.comprobante-emitido       (rental-service)
 
    Mensaje que un consumidor no pudo procesar ──► rentar.eventos.dlx ──► rentar.errores
 ```
@@ -206,6 +208,7 @@ lo implementa. Los puertos quedan reservados acá para no chocar en los merges:
 |---|---|---|---|
 | `registros-service` | `registros_db` | `5435` | `patentes_robadas` (verificación), `titularidades` (externos) |
 | `mantenimiento-service` | `mantenimiento_db` | `5436` | `solicitudes_mantenimiento` |
+| `facturacion-service` | `facturacion_db` | `5437` | `comprobantes` |
 
 `registros-service` lo crea quien implementa la verificación de vehículos. La
 validación de titularidad se suma después sobre ese mismo servicio y la misma

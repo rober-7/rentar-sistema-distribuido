@@ -30,6 +30,9 @@ EXTERNOS_VALIDACION_COMPLETADA = "vehiculos.externos.validacion.completada"
 RESERVA_CONFIRMADA = "reserva.confirmada"
 MANTENIMIENTO_RESULTADO = "mantenimiento.resultado"
 
+DEVOLUCION_REGISTRADA = "alquileres.devolucion.registrada"
+COMPROBANTE_EMITIDO = "facturacion.comprobante.emitido"
+
 # --- Colas (una por consumidor y responsabilidad) --------------------------
 # Convención: <servicio que consume>.<qué procesa>
 
@@ -43,6 +46,9 @@ COLA_VEHICULOS_EXTERNOS_COMPLETADA = "vehiculos.externos-completada"
 
 COLA_MANTENIMIENTO_RESERVAS = "mantenimiento.reservas-confirmadas"
 COLA_RESERVAS_MANTENIMIENTO = "reservas.mantenimiento-resultado"
+
+COLA_FACTURACION_DEVOLUCIONES = "facturacion.devoluciones-registradas"
+COLA_RESERVAS_FACTURACION = "reservas.comprobante-emitido"
 
 # Qué eventos llegan a cada cola. vehiculos.externos.registrados va a dos
 # colas: las dos validaciones corren en paralelo e independientes.
@@ -58,6 +64,8 @@ TOPOLOGIA = {
     COLA_VEHICULOS_EXTERNOS_COMPLETADA: [EXTERNOS_VALIDACION_COMPLETADA],
     COLA_MANTENIMIENTO_RESERVAS: [RESERVA_CONFIRMADA],
     COLA_RESERVAS_MANTENIMIENTO: [MANTENIMIENTO_RESULTADO],
+    COLA_FACTURACION_DEVOLUCIONES: [DEVOLUCION_REGISTRADA],
+    COLA_RESERVAS_FACTURACION: [COMPROBANTE_EMITIDO],
 }
 
 # --- Estructura de los payloads -------------------------------------------
@@ -77,6 +85,26 @@ CAMPOS = {
     EXTERNOS_VALIDACION_COMPLETADA: ("vehiculoExternoId",),
     RESERVA_CONFIRMADA: ("reservaId", "vehiculoId", "fechaInicio", "fechaFin"),
     MANTENIMIENTO_RESULTADO: ("reservaId", "vehiculoId", "resultado"),
+    DEVOLUCION_REGISTRADA: (
+        "reserva_id",
+        "vehiculo_id",
+        "cliente_id",
+        "kilometraje_final",
+        "importe_base",
+        "estado_general",
+        "fecha_devolucion",
+    ),
+    COMPROBANTE_EMITIDO: (
+        "comprobante_id",
+        "reserva_id",
+        "cliente_id",
+        "vehiculo_id",
+        "importe_base",
+        "penalizacion_km",
+        "penalizacion_danios",
+        "importe_total_final",
+        "emitido_en",
+    ),
 }
 
 RESULTADOS = {

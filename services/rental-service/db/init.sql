@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS reservas (
     estado_general VARCHAR
         CHECK (estado_general IN ('EXCELENTE', 'BUENO', 'DANIO_LEVE', 'DANIO_GRAVE')),
     fecha_devolucion TIMESTAMPTZ,
+    facturado BOOLEAN NOT NULL DEFAULT FALSE,
     activo BOOLEAN NOT NULL DEFAULT TRUE,
     "creadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "actualizadoEn" TIMESTAMPTZ NOT NULL DEFAULT now(),

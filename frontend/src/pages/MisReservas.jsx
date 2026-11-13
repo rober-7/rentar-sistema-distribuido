@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Container, Table, Button, Alert } from "react-bootstrap";
 import { useQuery } from "@apollo/client/react";
 import NavBarCliente from "../components/NavBarCliente";
+import ModalDevolucion from "../components/ModalDevolucion";
 import { CONSULTAR_RESERVAS } from "../graphql/reservasQueries";
 import { cancelarReserva } from "../services/reservas.service";
 import { obtenerClienteActual } from "../utils/clienteActual";
@@ -10,6 +11,8 @@ import Swal from "sweetalert2";
 
 const ESTADO_BADGE = {
   CONFIRMADA: "success",
+  FINALIZADO: "primary",
+  FINALIZADA: "primary",
   CANCELADA: "secondary",
 };
 
@@ -17,6 +20,7 @@ export default function MisReservas() {
   const navigate = useNavigate();
   const clienteActual = obtenerClienteActual();
   const [cancelandoId, setCancelandoId] = useState(null);
+  const [reservaDevolucion, setReservaDevolucion] = useState(null);
 
   const { data, loading, error, refetch } = useQuery(CONSULTAR_RESERVAS, {
     fetchPolicy: "network-only",
@@ -124,20 +128,38 @@ export default function MisReservas() {
                     </span>
                   </td>
                   <td>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      disabled={!puedeCancelar(r) || cancelandoId === r.id}
-                      onClick={() => handleCancelar(r)}
-                    >
-                      {cancelandoId === r.id ? "Cancelando..." : "Cancelar"}
-                    </Button>
+                    <div className="d-flex gap-2">
+                      {r.estado === "CONFIRMADA" && (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => setReservaDevolucion(r)}
+                        >
+                          Registrar Devolución
+                        </Button>
+                      )}
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={!puedeCancelar(r) || cancelandoId === r.id}
+                        onClick={() => handleCancelar(r)}
+                      >
+                        {cancelandoId === r.id ? "Cancelando..." : "Cancelar"}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))
             )}
           </tbody>
         </Table>
+
+        <ModalDevolucion
+          show={Boolean(reservaDevolucion)}
+          reserva={reservaDevolucion}
+          onHide={() => setReservaDevolucion(null)}
+          onSuccess={() => refetch()}
+        />
       </Container>
     </>
   );

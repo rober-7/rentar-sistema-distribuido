@@ -53,6 +53,7 @@ enum EstadoReserva {
   ESTADO_RESERVA_CONFIRMADA = 1;
   ESTADO_RESERVA_CANCELADA = 2;
   ESTADO_RESERVA_FINALIZADA = 3;
+  ESTADO_RESERVA_FINALIZADO = 4;
 }
 
 // Representa la entidad principal de una Reserva en el sistema.

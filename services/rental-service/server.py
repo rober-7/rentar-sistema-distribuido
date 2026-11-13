@@ -94,7 +94,8 @@ def asegurar_esquema_devolucion(engine) -> None:
                             'EXCELENTE', 'BUENO', 'DANIO_LEVE', 'DANIO_GRAVE'
                         )
                     ),
-                ADD COLUMN IF NOT EXISTS fecha_devolucion TIMESTAMPTZ;
+                ADD COLUMN IF NOT EXISTS fecha_devolucion TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS facturado BOOLEAN NOT NULL DEFAULT FALSE;
 
                 ALTER TABLE reservas
                 DROP CONSTRAINT IF EXISTS reservas_estado_check;
@@ -109,6 +110,54 @@ def asegurar_esquema_devolucion(engine) -> None:
                 """
             )
         )
+
+
+def _publicar_devolucion_registrada(reserva) -> None:
+    payload = {
+        "reserva_id": reserva["id"],
+        "vehiculo_id": reserva["vehiculo_id"],
+        "cliente_id": reserva["cliente_id"],
+        "kilometraje_final": reserva["kilometraje_final"],
+        "importe_base": float(reserva["importe_total"]),
+        "estado_general": reserva["estado_general"],
+        "fecha_devolucion": reserva["fecha_devolucion"].isoformat(),
+    }
+    try:
+        broker.publicar(contratos.DEVOLUCION_REGISTRADA, payload)
+    except AMQPError as error:
+        print(
+            f"[eventos] no se pudo publicar alquileres.devolucion.registrada "
+            f"para la reserva {reserva['id']} ({error!r})",
+            flush=True,
+        )
+
+
+def _registrar_comprobante_emitido(engine, payload: dict, _evento: dict) -> None:
+    with engine.begin() as conn:
+        reserva = conn.execute(
+            text(
+                """
+                UPDATE reservas
+                SET facturado = TRUE,
+                    "actualizadoEn" = now()
+                WHERE id = :reserva_id
+                RETURNING id
+                """
+            ),
+            {"reserva_id": payload["reserva_id"]},
+        ).first()
+
+    if reserva is None:
+        raise ValueError(
+            f"No existe la reserva {payload['reserva_id']} para el "
+            f"comprobante {payload['comprobante_id']}"
+        )
+
+    print(
+        f"[eventos] comprobante #{payload['comprobante_id']} registrado "
+        f"para reserva {reserva.id} (total=${payload['importe_total_final']})",
+        flush=True,
+    )
 
 
 def _publicar_reserva_confirmada(reserva) -> None:
@@ -181,11 +230,8 @@ def _fila_a_pb(reserva) -> pb.Reserva:
     respuesta.fecha_inicio = reserva["fecha_inicio"].isoformat()
     respuesta.fecha_finalizacion = reserva["fecha_finalizacion"].isoformat()
     respuesta.importe_total = float(reserva["importe_total"])
-    estado_db = (
-        "FINALIZADA" if reserva["estado"] == "FINALIZADO" else reserva["estado"]
-    )
     respuesta.estado = pb.EstadoReserva.Value(
-        f"ESTADO_RESERVA_{estado_db}"
+        f"ESTADO_RESERVA_{reserva['estado']}"
     )
     respuesta.activo = reserva["activo"]
     return respuesta
@@ -330,7 +376,7 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             estado = pb.EstadoReserva.Name(request.estado).removeprefix(
                 "ESTADO_RESERVA_"
             )
-            if estado == "FINALIZADA":
+            if estado in ("FINALIZADA", "FINALIZADO"):
                 condiciones.append("estado IN ('FINALIZADA', 'FINALIZADO')")
             elif estado != "UNSPECIFIED":
                 condiciones.append("estado = :estado")
@@ -552,8 +598,10 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
                         fecha_devolucion = now(),
                         "actualizadoEn" = now()
                     WHERE id = :id
-                    RETURNING id, vehiculo_id, kilometraje_final,
-                              estado_general, estado, fecha_devolucion
+                    RETURNING id, vehiculo_id, cliente_id,
+                              "importeTotal" AS importe_total,
+                              kilometraje_final, estado_general, estado,
+                              fecha_devolucion
                     """
                 ),
                 {
@@ -573,6 +621,8 @@ class ReservaServiceServicer(pb_grpc.ReservaServiceServicer):
             )
         except grpc.RpcError as error:
             self._reenviar_error_grpc(error, context, "Vehicle Service")
+
+        _publicar_devolucion_registrada(actualizada)
 
         return pb.RegistrarDevolucionResponse(
             reserva_id=actualizada["id"],
@@ -612,6 +662,14 @@ def main():
         {
             contratos.MANTENIMIENTO_RESULTADO: lambda payload, evento: (
                 _registrar_resultado_mantenimiento(engine, payload, evento)
+            )
+        },
+    )
+    broker.escuchar(
+        contratos.COLA_RESERVAS_FACTURACION,
+        {
+            contratos.COMPROBANTE_EMITIDO: lambda payload, evento: (
+                _registrar_comprobante_emitido(engine, payload, evento)
             )
         },
     )

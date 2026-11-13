@@ -3,6 +3,8 @@ import { registerEnumType } from '@nestjs/graphql';
 export enum EstadoReserva {
   CONFIRMADA = 'CONFIRMADA',
   CANCELADA = 'CANCELADA',
+  FINALIZADA = 'FINALIZADA',
+  FINALIZADO = 'FINALIZADO',
 }
 
 registerEnumType(EstadoReserva, {
@@ -17,6 +19,13 @@ registerEnumType(EstadoReserva, {
       description:
         'Reserva cancelada por el cliente antes de que comenzara el ' +
         'alquiler; no bloquea el vehículo.',
+    },
+    FINALIZADA: {
+      description: 'Reserva finalizada tras la devolución del vehículo.',
+    },
+    FINALIZADO: {
+      description:
+        'Alquiler finalizado tras registrar la devolución del vehículo; libera el vehículo.',
     },
   },
 });

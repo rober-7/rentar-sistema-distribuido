@@ -17,3 +17,16 @@ export const CONSULTAR_RESERVAS = gql`
     }
   }
 `;
+
+export const REGISTRAR_DEVOLUCION = gql`
+  mutation RegistrarDevolucion($input: RegistrarDevolucionInput!) {
+    registrarDevolucion(input: $input) {
+      reservaId
+      kilometrajeFinal
+      estadoGeneral
+      estado
+      fechaDevolucion
+      mensaje
+    }
+  }
+`;

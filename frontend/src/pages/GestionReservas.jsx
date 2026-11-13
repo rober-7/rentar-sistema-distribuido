@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { Container, Form, Button, Row, Table, Alert, Card } from 'react-bootstrap';
 import { useLazyQuery } from '@apollo/client/react';
 import NavBar from '../components/NavBar';
+import ModalDevolucion from '../components/ModalDevolucion';
 import { CONSULTAR_RESERVAS } from '../graphql/reservasQueries';
 import { obtenerClientes } from '../services/clientes.service';
 import { obtenerVehiculos } from '../services/vehiculos.service';
 
 const ESTADO_BADGE = {
   CONFIRMADA: 'success',
+  FINALIZADO: 'primary',
+  FINALIZADA: 'primary',
   CANCELADA: 'secondary',
 };
 
@@ -34,7 +37,10 @@ export default function GestionReservas() {
   const [filtro, setFiltro] = useState(FILTRO_INICIAL);
   const [clientes, setClientes] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
-  const [ejecutarBusqueda, { loading, data, error }] = useLazyQuery(CONSULTAR_RESERVAS);
+  const [reservaDevolucion, setReservaDevolucion] = useState(null);
+  const [ejecutarBusqueda, { loading, data, error }] = useLazyQuery(CONSULTAR_RESERVAS, {
+    fetchPolicy: 'network-only',
+  });
 
   useEffect(() => {
     obtenerClientes().then(setClientes);
@@ -48,19 +54,18 @@ export default function GestionReservas() {
     setFiltro({ ...filtro, [name]: value });
   };
 
+  const construirVariablesFiltro = () => ({
+    ...(filtro.clienteId && { clienteId: parseInt(filtro.clienteId, 10) }),
+    ...(filtro.vehiculoId && { vehiculoId: parseInt(filtro.vehiculoId, 10) }),
+    ...(filtro.tipoVehiculo && { tipoVehiculo: filtro.tipoVehiculo }),
+    ...(filtro.estado && { estado: filtro.estado }),
+    ...(filtro.desde && { desde: new Date(filtro.desde).toISOString() }),
+    ...(filtro.hasta && { hasta: new Date(filtro.hasta).toISOString() }),
+  });
+
   const handleSubmit = (e) => {
     e.preventDefault();
-
-    const variablesFiltro = {
-      ...(filtro.clienteId && { clienteId: parseInt(filtro.clienteId, 10) }),
-      ...(filtro.vehiculoId && { vehiculoId: parseInt(filtro.vehiculoId, 10) }),
-      ...(filtro.tipoVehiculo && { tipoVehiculo: filtro.tipoVehiculo }),
-      ...(filtro.estado && { estado: filtro.estado }),
-      ...(filtro.desde && { desde: new Date(filtro.desde).toISOString() }),
-      ...(filtro.hasta && { hasta: new Date(filtro.hasta).toISOString() }),
-    };
-
-    ejecutarBusqueda({ variables: { filtro: variablesFiltro } });
+    ejecutarBusqueda({ variables: { filtro: construirVariablesFiltro() } });
   };
 
   const handleLimpiar = () => {
@@ -116,6 +121,7 @@ export default function GestionReservas() {
                 <Form.Select name="estado" value={filtro.estado} onChange={handleChange}>
                   <option value="">Todos</option>
                   <option value="CONFIRMADA">Confirmada</option>
+                  <option value="FINALIZADO">Finalizado</option>
                   <option value="CANCELADA">Cancelada</option>
                 </Form.Select>
               </Form.Group>
@@ -155,12 +161,13 @@ export default function GestionReservas() {
               <th>Precio/Día</th>
               <th>Importe Total</th>
               <th>Estado</th>
+              <th>Acción</th>
             </tr>
           </thead>
           <tbody>
             {reservas.length === 0 ? (
               <tr>
-                <td colSpan="8" className="text-center text-muted">
+                <td colSpan="9" className="text-center text-muted">
                   {loading ? 'Consultando el servidor...' : 'No hay reservas para los filtros seleccionados.'}
                 </td>
               </tr>
@@ -177,11 +184,33 @@ export default function GestionReservas() {
                   <td>
                     <span className={`badge bg-${ESTADO_BADGE[r.estado] || 'dark'}`}>{r.estado}</span>
                   </td>
+                  <td>
+                    {r.estado === 'CONFIRMADA' ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setReservaDevolucion(r)}
+                      >
+                        Registrar Devolución
+                      </Button>
+                    ) : (
+                      <span className="text-muted small">-</span>
+                    )}
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </Table>
+
+        <ModalDevolucion
+          show={Boolean(reservaDevolucion)}
+          reserva={reservaDevolucion}
+          onHide={() => setReservaDevolucion(null)}
+          onSuccess={() =>
+            ejecutarBusqueda({ variables: { filtro: construirVariablesFiltro() } })
+          }
+        />
       </Container>
     </>
   );
